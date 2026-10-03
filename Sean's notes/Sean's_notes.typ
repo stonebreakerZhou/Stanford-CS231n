@@ -1408,6 +1408,321 @@ $ B_(t+1) y_t = s_t $
 
 
 
+#place(top, scope: "parent", float: true)[
+  #align(center + horizon)[  // horizon 让它垂直居中页顶区域，更美观
+    #text(font: "Georgia", weight: "bold", size: 24pt)[§ Lec IV]  //
+    #v(0em)
+    #line(length: 100%, stroke: 1pt)  // 可选：加一条装饰线
+  ]
+]
+
+=== 1. Neural Networks
+
+\
+Linear score function : $ f = W x $
+2-layer Neural Network : $ f = W_2 max(0, W_1 x) $
+3-layer Neural Network : $ f = W_3 max(0, W_2 max(0, W_1 x)) $
+
+$
+  x in RR^D, W_1 in RR^(H_1 times D), W_2 in RR^(H_2 times H_1), W_3 in RR^(C times H_2)
+$
+
+~~~~Why do we want non-linearity ?\
+~~~~If the data is not linearly separable, then we'd apply feature transform and map the data point to a linearly separable status.
+
+#figure(
+  image("images/Lec4_why_non-linearity.png", width: 100%),
+  caption: [non-linear mapping],
+)
+
+
+~~~~2-layer neural network hierarchical computation :
+
+#figure(
+  image("images/Lec4_2-layer_neural_network.png", width: 80%),
+  caption: [2-layer neural network],
+)
+
+\
+
+We have activation functions like :\
+
+ReLU, Sigmoid, Leaky ReLU, Tanh, ELU, GELU, SiLU......
+
+~~~~ReLU is a good default choice for most problems.
+
+
+
+
+
+~~~~Setting the number of the layers and their sizes, and the regularization strength.
+
+#figure(
+  image("images/Lec4_neural_layer_size.png", width: 100%),
+  caption: [layer size],
+)
+
+#figure(
+  image("images/Lec4_lambda_value.png", width: 100%),
+  caption: [regularization strength],
+)
+
+
+\
+\
+\
+\
+\
+\
+\
+
+=== 2. Computational graphs and Backpropagation
+\
+#figure(
+  image("images/Lec4_backpropagation_figure.png", width: 100%),
+  caption: [backpropagation],
+)
+
+
+
+
+\
+*gradient backpropagation *:
+#text(fill: red)[
+  *$ "downstream" = "local" times "upstream" $*
+]
+#figure(
+  image("images/Lec4_gradient_backpropagation.png", width: 100%),
+  caption: [gradient backpropagation],
+)
+
+
+\
+\
+
+- *Patterns in gradient flow :*
+
+*① add gate : gradient distributor*
+
+#figure(
+  image("images/Lec4_add_gate.png", width: 50%),
+  caption: [add gate],
+)
+~~~~从上游传过来的 upstream gradient 会原封不动分发给下游每一个输入
+
+
+*② mul gate : "swap multiplier"*
+
+#figure(
+  image("images/Lec4_mul_gate.png", width: 50%),
+  caption: [mul gate],
+)
+上游梯度会乘以另一个输入的值，然后加到该输入的梯度累积中
+
+
+
+*③ copy gate : gradient adder*
+
+#figure(
+  image("images/Lec4_copy_gate.png", width: 50%),
+  caption: [copy gate],
+)
+
+复制门在反向传播时执行梯度累加，多个分支的梯度又“累加”回同一个变量。
+
+
+
+④ max gate : gradient router
+
+#figure(
+  image("images/Lec4_max_gate.png", width: 50%),
+  caption: [max gate],
+)
+
+把上游梯度只路由到那个最大的输入，其他输入得到零梯度。
+
+
+
+\
+\
+\
+\
+\
+\
+
+- *Derivatives :*
+
+*① Scalar to Scalar :*
+$
+  x, y in RR
+$
+$ (dif y)/(dif x) $
+
+*② Vector to Scalar :*
+$
+  x in RR^N, y in RR
+$
+$
+  nabla_x y = mat((partial y)/(partial x_1); dots.v; (partial y)/(partial x_n)) in RR^(N times 1) \
+  (nabla_x y)_i = (partial y)/(partial x_i)
+$
+
+
+*② Vector to Vector : derivative is Jacobian :* （约定以下雅可比矩阵采用分母布局）
+$
+  x in RR^N, y in RR^M
+$
+
+$
+  J_(i j) = (partial y_j)/(partial x_i) \
+  J = mat(
+    (partial y_1)/(partial x_1), dots, (partial y_M)/(partial x_1);
+    dots, dots, dots;
+    (partial y_1)/(partial x_N), dots, (partial y_M)/(partial x_N)
+  ) in RR^(N times M)
+$
+
+
+
+
+
+~~~~同理可以推广到关于矩阵参数的反向传播，也就是 Tensor 类型的数据。下面先用一个简单图示说明怎样确定各梯度的形状 ：
+
+#figure(
+  image("images/Lec4_backprop_with_matrices_illustration.png", width: 100%),
+  caption: [backprop with matrices —— illustration e.g.],
+)
+
+
+
+- 已知 ： 输入 $x in RR^(D_x times M_x), y in RR^(D_y times M_y)$，输出为 $z in RR^(D_z times M_z)$
+
+\
+*① 先求 upstream gradient 形状 :*\
+
+由于最终的损失值 $L in RR$，故有：
+$
+  (d L) / (d z) in RR^(D_z times M_z)
+$
+(因为 $L$ 为标量，故偏导形状与 $z$ 形状一样)
+\
+
+*② 再求 local gradients 的形状 :* \
+
+~~~~注意如果我们认为 $z, x, y$ 都是矩阵的话那么偏导求出来应该是一个四维张量（因为有4个独立的索引）；但是如果我们把 $z, x, y$ 展平为向量，并在分母布局下求偏导，就得到雅可比矩阵 (Jacobian matrices) ：\
+
+$
+  z -> RR^(D_Z M_z times 1)\
+  x -> RR^(D_x M_x times 1)\
+  y -> RR^(D_y M_y times 1)\
+  (partial z) / (partial x) in RR^((D_x M_x) times (D_z M_z)) \
+  (partial z) / (partial y) in RR^((D_y M_y) times (D_z M_z))
+$
+
+
+*③ 最后得到 downstream gradients 的形状 ：*
+
+$
+  (partial L) / (partial x) & = (partial z) / (partial x) dot (partial L) / (partial z) \
+                            & -> RR^((D_x M_x) times (D_z M_z)) dot RR^(D_z times M_z) \
+                            & -> RR^((D_x M_x) times (D_z M_z)) dot RR^((D_z M_z) times 1) \
+                            & in RR^(D_x M_x) \
+$
+$
+  (partial L) / (partial y) & = (partial z) / (partial y) dot (partial L) / (partial z) \
+                            & -> RR^((D_y M_y) times (D_z M_z)) dot RR^((D_z M_z) times 1) \
+                            & in RR^(D_y M_y)
+$
+
+~~~~最终 downstream gradients 可以被 reshape 为 $RR^(D_x times M_x)$ 与 $RR^(D_y times M_y)$
+
+\
+
+
+~~~~In practice, the Jacobians would be too large to store so that we should do the process implicitly.
+
+
+\
+\
+
+
+
+- *Simple example :*
+\
+设定 :
+
+$ x in RR^(N times D), quad w in RR^(D times M), quad y = x w in RR^(N times M) $
+
+具体数值：
+
+$ x = mat(2, 1, -3; -3, 4, 2) quad (N=2, D=3) $
+
+$ w = mat(3, 2, 1, -1; 2, 1, 3, 2; 3, 2, 1, -2) quad (D=3, M=4) $
+
+$ y = x w = mat(1, 3, 9, -2; -6, 5, 2, 17) quad (N=2, M=4) $
+
+upstream gradient :
+
+$ (partial L)/(partial y) in RR^(N times M) = mat(2, 3, -3, 9; -8, 1, 4, 6) $
+
+~~~~如果我们直接计算 local gradient 的 Jacobian 的话 ：
+
+$
+  (partial y) / (partial x) in RR^((N D) times (N M))\
+  (partial y) / (partial w) in RR^((D M) times (N M))
+$
+
+~~~~For a neural net we may have $N=64, D=M=4096$, then each Jacobian takes \~256 GB of memory! So we must work with them implicitly!
+
+
+
+
+① Q1 : $x$ 的一个元素影响 $y$ 的哪些部分？\
+~~~~A1 : 由于 $y = x w$ 为矩阵乘法，故 $y$ 的 $i, j$ 元素由 $x$ 的第 $i$ 行向量与 $w$ 的第 $j$ 列向量内积得到，则 $x$ 第 $i$ 行的任意一个元素都会影响 $y$ 第 $i$ 行的所有元素值！
+
+\
+
+② Q2 : $x_(n d)​$ 对 $y_(n m)$ 的影响有多大？
+
+~~~A2 : 由于 $y_(n m) = sum_(k = 1)^D x_(n k) w_(k m)$，里面有关 $x_(n d)$ 的项就只有 $x_(n d) w_(m d)$，所以 ：
+$
+  (partial y_(n m)) / (partial x_(n d)) = w_(m d)
+$
+
+\
+~~~~综上 ① ②，我们可以在不显式存储 Jacobian 的情况下直接推导出损失 $L$ 关于输入每一项 $x_(n d)$ 的偏导数：
+$
+  (partial L) / (partial x_(n d)) &= sum_(m = 1)^M (partial L) / (partial y_(n m)) dot (partial y_(n m)) / (partial x_(n d))\
+  &= sum_(m=1)^M (partial L) / (partial y_(n m)) dot w_(m d)
+$
+
+~~~~进一步还可以写成矩阵乘法形式：
+$ frac(partial L, partial x) = frac(partial L, partial y) w^top $
+
+~~~~形状验证：
+$
+  RR^(N times D) equiv RR^(N times M) dot RR^(M times D)
+$
+成立！
+
+~~~~同理还可得：
+$ frac(partial L, partial w) = x^top frac(partial L, partial y) $
+
+\
+\
+
+~~~~所以上述就直接推导出了损失关于输入 $x$ 和参数 $w$ 的偏导数计算方式，反向传播可以完全在矩阵层面完成，而不需要去显式存储庞大的 Jacobian ！
+
+
+
+
+
+
+
+#pagebreak()
+
+
+
 
 
 
