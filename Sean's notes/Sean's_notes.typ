@@ -1719,7 +1719,583 @@ $ frac(partial L, partial w) = x^top frac(partial L, partial y) $
 
 
 
+
 #pagebreak()
+
+
+
+
+
+
+
+
+
+#place(top, scope: "parent", float: true)[
+  #align(center + horizon)[  // horizon 让它垂直居中页顶区域，更美观
+    #text(font: "Georgia", weight: "bold", size: 24pt)[§ Lec V]  //
+    #v(0em)
+    #line(length: 100%, stroke: 1pt)  // 可选：加一条装饰线
+  ]
+]
+
+== Image Classification with CNNs (taught by Justin Johnson)
+
+\
+
+
+Problem : Linear classifiers are not powerful !
+
+\
+*_Reason ① : Visual viewpoint_* :\
+~~~~Linear classifiers just learn one template per class.
+
+#figure(
+  image("images/Lec5_problem_with_linear_classifier_viewpoint1.png", width: 80%),
+  caption: [visualized templates],
+)
+
+~~~~That means, we can interpret the linear classifier by thinking of that the learned weight matrix $W$ as a image where we learn one image template for each of the categories.\
+~~~~And we'll realize that the each row of that weight matrix is just one template.\
+~~~~An linear classifier basically has to summarize all the knowledge it has about each category and into just one template.
+
+\
+
+*_Reason ② : Geometric viewpoint_* :\
+Linear classifiers just do linear separation of the feature space.
+
+~~~~Therefore, we stack the linear layers and insert non-linearity between the layers and end up with a powerful mechanism for predicting scores for our inputs.
+
+
+\
+\
+\
+\
+
+
+=== 1. *Feature extraction back in the day*
+\
+~~~~Now we are using the raw pixels of images as the input of neural networks, but back then people tried to extract high-level features of the images as input.
+
+- *Example 1 : color histogram*
+
+~~~~Only look at color and no spatial structure.
+
+#figure(
+  image("images/Lec5_color_histogram.png", width: 100%),
+  caption: [color histogram],
+)
+
+\
+
+- *Example 2 : Histogram of Oriented Gradients (HoG)*
+
+~~~~Throw away color and only look at structure information.
+
+#figure(
+  image("images/Lec5_HoG.png", width: 100%),
+  caption: [HoG],
+)
+
+\
+
+
+~~~~Therefore, people back then use these different feature extractor to get different representations and concatenate them together to get a big feature as input.
+
+#figure(
+  image("images/Lec5_feature_extract_and_concatenate.png", width: 100%),
+  caption: [feature extract and concatenate],
+)
+
+\
+\
+
+~~~~However, now we simply use neural networks to do end-to-end learning. The only difference is that now the feature extraction is tuned by gradient descent and will be learned from the training data and is not human designed.
+
+\
+\
+\
+
+~~~~Previously we've talked about he simple 2-layer neural network where we flatten the raw image pixels into a long vector and input.
+\
+~~~~However, the *_spatial structure_* of images is detroyed this way. #underline[When we process images, *_we should respect the 2-dimensional structure of images !_*]
+
+\
+\
+\
+
+=== 2. Convolutional Neural Networks
+\
+~~~~And that leads us to *convolutional neural network* :
+#figure(
+  image("images/Lec5_CNN.png", width: 100%),
+  caption: [CNN architecture design],
+)
+
+~~~~#underline[This whole network is trained end-to-end with backprop and gradient descent.]
+
+
+
+
+*Timeline* :\
+2012 - 2020 : ConvNets dominate all vision tasks\
+2021 - present : Transformers (ViT) have taken over
+
+\
+\
+
+
+- *Recap : fully-connected layer*
+
+~~~~Suppose we have a $32 times 32 times 3$ image, and we stretch it to a $3072 times 1$ vector.
+
+#figure(
+  image("images/Lec5_fully_connected_layer_intuition.png", width: 100%),
+  caption: [fully connected layer intuition],
+)
+
+~~~~Note that we can think the dot product between a row of $W$ and the input vector as a *_template match_* ! So the output numbe is the template matching score that tells us which template the input matches best.
+
+\
+\
+\
+\
+
+==== *1 ) Convolutional layer*
+\
+~~~~Suppose we have a $32 times 32 times 3$ image, now we're gonna preserve the original spatial structure of the image. So it's gonna be a 3 dimensional tensor of 3 channels.
+
+#figure(
+  image("images/Lec5_convolutional_layer_intuition1.png", width: 100%),
+  caption: [fully connected layer intuition],
+)
+
+~~~~Our filter needs to have the same 3 channels as the input tensor. #underline[Then we slide the filter over the image spatially and compute dot products.]
+
+#figure(
+  image("images/Lec5_convolutional_layer_filter_slide.png", width: 45%),
+  caption: [filter slide over the image],
+)
+
+~~~~Note that we can think the filter as a *_subtemplate_* and we are actually do *_matching_* between the subtemplate and the subchunk of our image !
+\
+
+~~~~After we've got all the dot product activations, we collect them and get a 2-dimensional activation map.
+
+#figure(
+  image("images/Lec5_convolutional_layer_activation_map.png", width: 100%),
+  caption: [activation plane of a filter],
+)
+
+~~~~Now let's imagine 6 similar filters in total that will finally give us 6 activation maps. And we stack them together.
+
+#figure(
+  image("images/Lec5_convolutional_layer_activation_maps_stacking.png", width: 100%),
+  caption: [activation maps stacking],
+)
+
+~~~~Note that the convolutional layer basically takes in a 3-dimensional input image and the 4-dimensional ($6 times 3 times 5 times 5$) filter tensor and gives out the 6 response(activation) planes.
+\
+
+~~~~After we collect the response(activation) planes and stack them into a 3-dimensional tensor,
+\
+~~~~In this convolutional neural network we'd use a 6-dim bias vector. Each dimension of the bias vector will be only be used for the corresponding filter by #underline[broadcasting].
+
+\
+
+~~~~Generally, we can get this graph with *_batched input_* :
+#figure(
+  image("images/Lec5_convolutional_layer_batched_input.png", width: 100%),
+  caption: [batched input],
+)
+
+
+\
+\
+\
+
+
+*A ConvNet is a neural network with Conv layers and activation functions !*
+
+#figure(
+  image("images/Lec5_ConvNet=Convlayers+activations.png", width: 100%),
+  caption: [*_ConvNet = Conv layers + activations_*],
+)
+
+~~~~Note that activations here are critical because dot product is a linear operator, and the composition of linear operators is still a linear operator.
+
+
+
+
+
+
+#pagebreak()
+
+
+
+
+
+
+- *What do filters learn ?*\
+~~~~Previously, linear classifiers(MLP) learned one template per class, and those form *_a bank of whole-image templates_*.
+#figure(
+  image("images/Lec5_MLP_template_bank_learned.png", width: 50%),
+  caption: [first layer learned],
+)
+
+~~~~Now, because each filter is just a subchunk of a image, then the first layer just learns *_local image templates_*. (Often learns oriented edges, opposing colors) And the deeper conv layers tend to learn *_larger stuctures_*.
+
+#grid(
+  columns: (1fr, 1fr),
+  gutter: 1em,
+  figure(
+    image("images/Lec5_first_convlayer_learned.png", width: 100%),
+    caption: [first layer learned],
+  ),
+  figure(
+    image("images/Lec5_deeper_convlayers_learned.png", width: 100%),
+    caption: [deeper layers learned],
+  ),
+)
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+
+- *Padding*
+
+Input : $W times W$\
+Filter : $K times K$\
+Output : $W - K + 1$
+
+\
+Problem : Feature maps shrink with each layer !\
+
+Solution : Add *padding* around the input before sliding the filter.
+
+#figure(
+  image("images/Lec5_padding.png", width: 50%),
+  caption: [padding],
+)
+
+Padding : $P$\
+Ouput : $W - K + 1 + 2P$
+
+Common setting : $P = (K-1) / 2$ so that output has the same size as input.
+
+\
+\
+\
+\
+- *Recptive Fields*
+
+~~~~感受野：输出特征图上的一个点，能“看到”原始输入图像的多大区域，就是它的感受野。感受野决定了：一个神经元能利用多大范围的输入信息来做判断。\
+
+~~~~For convolution with kernel size K, each element in the output depends on a $K times K$ receptive field in the input.\
+
+~~~~Each successive convolution adds K – 1 to the receptive field size. With L layers the receptive field size is $1 + L times (K – 1)$.
+
+简单推导：
+
+假设每一层都是 $K times K$ 卷积，stride $= 1$，无 padding。
+
+第一层：感受野 $= K times K$。
+
+第二层：每一个输出元素，来自第一层的一个 $K times K$ 区域。  而第一层每个元素又对应输入中一个 $K times K$ 区域。所以第二层输出元素对应的输入区域是：
+
+$ (K + K - 1) times (K + K - 1) $
+
+感受野大小（注意是感受面积的边长！）为：
+
+$ 1 + 2(K - 1) $
+
+进而可得这个情况下第 $n$ 层感受野为：
+
+$ 1 + n(K - 1) $
+
+
+
+
+
+
+
+
+
+#figure(
+  image("images/Lec5_receptive_fields.png", width: 100%),
+  caption: [receptive fields],
+)
+
+~~~~进一步还有“有效感受野”的概念（effective receptive fields），有效感受野包含于上述所说的理论感受野当中。
+
+
+~~~~In ConvNet, *_effective receptive fields actually grows #underline[linearly] with the depth of convolution layers_*.
+
+\
+\
+\
+\
+
+
+*Problem *: For large images we need many layers for  each output to “see” the whole image image.
+
+*Solution*: We want to expand the receptive fields more quickly in a more efficient way. *Downsample inside the network*.
+
+（下采样：降低特征图的空间分辨率（高和宽），让特征图变小，会让后续层的感受野增长更快）
+\
+\
+\
+\
+\
+
+
+- *Strided convolution*
+
+Input : $W times W$\
+Filter : $K times K$\
+Padding : $P$\
+Stride : $S$\
+Ouput : $(W - K + 2P) / S + 1$
+
+~~~~When we do strided convolution, it effectively downsamples the image inside the neural network.
+\
+~~~~Now we can get *exponential growth* in the effective receptive field ! And with fewer layers the effective exponential field is big enough to cover the entire original image.
+
+\
+
+~~~~关于 strided convolution 感受野大小的推导：
+
+1. 先定义“第 $l$ 层的步长” $R_l$
+
+~~~~设 $R_l$ 表示：第 $l$ 层输出移动 1 个位置，对应到原始输入中移动了多少个位置。
+
+① 第 1 层直接作用在输入上，stride $= S$。
+所以第 1 层输出移动 1 格，输入移动 $S$ 格：
+$ R_1 = S $
+
+② 第 2 层作用在第 1 层输出上，stride $= S$。第 2 层输出移动 1 格 → 第 1 层移动 $S$ 格 → 输入移动 $S dot S = S^2$ 格。
+$ R_2 = S^2 $
+
+~~~~进而可以推出 ：$ R_l = S^l $
+
+\
+
+2. 第 $l$ 层的感受野从哪里来？
+
+~~~~第 $l$ 层的某个输出元素，是由第 $l-1$ 层中连续 $K$ 个位置算出来的。
+
+~~~~设这 $K$ 个位置为：
+
+$ p, p+1, p+2, dots, p+K-1 $
+
+其中 $p$ 是起点。\
+~~~~这 $K$ 个位置中，第一个和最后一个的输入覆盖范围：
+
+- 第 $l-1$ 层位置 $p$ 的感受野，覆盖输入中某个区间，起点为 $a$；
+- 第 $l-1$ 层位置 $p+K-1$ 的感受野，覆盖输入中某个区间，起点为：
+
+$ a + (K-1) dot R_(l-1) $
+
+~~~~这里是因为第 $l-1$ 层输出每移动 1 格，对应到输入中移动 $R_(l-1)$ 格。所以从位置 $p$ 到位置 $p+K-1$，中间移动了 $K-1$ 格，对应输入中移动了：
+
+$ (K-1) dot R_(l-1) $
+
+\
+
+3. 第 $l$ 层感受野的增量
+
+~~~~#underline[第 $l$ 层的感受野，是这 $K$ 个第 $l-1$ 层位置的感受野的并集。]
+
+~~~~第 1 个位置贡献了最左端；第 $K$ 个位置贡献了最右端；中间的位置都被包含在内。
+
+~~~~所以第 $l$ 层感受野的边长，比第 $l-1$ 层感受野的边长多出：
+
+$
+  Delta_l & = (K-1) dot R_(l-1) \
+          & = (K-1) dot S^(l-1)
+$
+
+
+\
+
+~~~~有了这个增量式，进一步地，我们可以推出步长 stride = $S$ 下的感受野大小 ：
+$
+  r_1 = K\
+  Delta_l = (K - 1) dot S^(l-1)\
+  r_l = r_(l-1) + Delta_l\
+  => r_l= K + (K-1) dot frac(S^l - S, S - 1) quad (S != 1)
+$
+
+~~~~所以说此时 $r_l$ 随着层数 $l$ 增大成指数形式增大！
+
+
+
+
+
+\
+
+#rect[
+  *Convolution Summary*
+
+  *Input:* $C_"in" times H times W$
+
+  *Hyperparameters:*
+
+  - Kernel size: $K_H times K_W$
+  - Number filters: $C_"out"$ （注意 filter个数与输出channels数相等！）
+  - Padding: $P$
+  - Stride: $S$
+
+  *Weight matrix:* $C_"out" times C_"in" times K_H times K_W$
+  giving $C_"out"$ filters of size $C_"in" times K_H times K_W$
+
+  *Bias vector:* $C_"out"$
+
+  *Output size:* $C_"out" times H' times W'$ where:
+
+  - $H' = (H - K + 2P) / S + 1$
+  - $W' = (W - K + 2P) / S + 1$
+
+  *Common settings:*
+
+  - $K_H = K_W$ (Small square filters)
+  - $P = (K - 1) / 2$ ("Same" padding)
+  - $C_"in", C_"out" = 32, 64, 128, 256$ (powers of 2)
+  - $K = 3, P = 1, S = 1$ ($3 times 3$ conv)
+  - $K = 5, P = 2, S = 1$ ($5 times 5$ conv)
+  - $K = 1, P = 0, S = 1$ ($1 times 1$ conv)
+  - $K = 3, P = 1, S = 2$ (Downsample by 2)
+]
+
+\
+\
+\
+- Additionally, convolution can go beyond 2-D to *1-D* and *3-D*.
+
+#figure(
+  image("images/Lec5_1D_convolution.png", width: 60%),
+  caption: [1-D convolution],
+)
+
+#figure(
+  image("images/Lec5_3D_convolution.png", width: 60%),
+  caption: [3-D convolution],
+)
+
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+==== 2 ) Pooling Layer
+\
+~~~~Pooling is another way to *downsample* inside the neural network.\
+~~~~And pooling is cheap to downsample and it doesn't cost much computation, whereas most computation happens at the convolution layers.
+
+\
+
+~~~~Given an input of $C times H times W$, pooling just downsamples each $1 times H times W$ plane and gives back the same number of channels but of different spatial size.
+
+#figure(
+  image("images/Lec5_pooling_figure.png", width: 80%),
+  caption: [pooling],
+)
+
+\
+
+- *Maxpooling*
+
+~~~~One common downsampling way that pooling uses is *maxpooling*.
+
+#figure(
+  image("images/Lec5_maxpooling_figure.png", width: 100%),
+  caption: [maxpooling],
+)
+
+~~~~This simply does spatial compression.
+~~~~Note that typically we don't use padding in pooling layers.
+\
+~~~~Max pooling 本身是非线性操作（取最大值），所以它引入了非线性；Average pooling 是线性操作，所以通常在 average pooling 前需要 ReLU 等非线性激活；实际网络中 max pooling 后通常仍会有 ReLU。
+
+\
+\
+\
+
+#rect[
+  *Pooling Summary*
+
+  *Input:* $C times H times W$
+
+  *Hyperparameters:*
+
+  - Kernel size: $K$
+  - Stride: $S$
+  - Pooling function: max, avg
+
+  *Output size:* $C times H' times W'$ where:
+
+  - $H' = (H - K) / S + 1$
+  - $W' = (W - K) / S + 1$
+
+  #underline[No learnable parameters.]
+
+  *Common setting:*
+
+  - #text(fill: blue)[max, $K = 2, S = 2$ => Gives $2 times$ downsampling]
+]
+
+\
+
+
+
+
+- *Convolution and Pooling: Translation Equivariance*
+
+#figure(
+  image("images/Lec5_translation_equivariance.png", width: 100%),
+  caption: [translation equivariance],
+)
+
+“输入平移多少，输出也平移多少” ：先平移再卷积 = 先卷积再平移
+
+e.g. 假设图像中有一只猫在左上角，卷积后某个位置会有一个强响应。现在把猫移到右下角，卷积后右下角对应的位置也会有同样的强响应。\
+猫移动了，响应也移动了相同距离
+
+\
+*_Intuition_* : Features of images don’t depend on their location in the image.
+
+
+
+
+
+
+
+#pagebreak()
+
+
+
+
+
+
+
 
 
 
