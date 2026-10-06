@@ -2288,6 +2288,10 @@ e.g. 假设图像中有一只猫在左上角，卷积后某个位置会有一个
 
 
 
+
+
+
+
 #pagebreak()
 
 
@@ -2300,6 +2304,731 @@ e.g. 假设图像中有一只猫在左上角，卷积后某个位置会有一个
 
 
 
+
+
+#place(top, scope: "parent", float: true)[
+  #align(center + horizon)[  // horizon 让它垂直居中页顶区域，更美观
+    #text(font: "Georgia", weight: "bold", size: 24pt)[§ Lec VI]  //
+    #v(0em)
+    #line(length: 100%, stroke: 1pt)  // 可选：加一条装饰线
+  ]
+]
+
+== Training CNNs and CNN Architectures (taught by Zane Durante)
+\
+
+outline :
+#grid(
+  columns: (auto, 1fr),
+  row-gutter: 0.8em,
+  column-gutter: 0.6em,
+  align: (right + horizon, left + horizon),
+
+  [How to build CNNs?],
+  [
+    $
+      cases(
+        "Layers in CNNs",
+        "CNN Architectures",
+        "Activation Functions",
+        "Weight Initialization",
+      )
+    $
+  ],
+
+  [How to train CNNs?],
+  [
+    $
+      cases(
+        "Data Preprocessing",
+        "Data augmentation",
+        "Transfer Learning",
+        "Hyperparameter Selection",
+      )
+    $
+  ],
+)
+
+\
+#figure(
+  image("images/Lec6_CNNs_components.png", width: 100%),
+  caption: [CNNs components],
+)
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+
+=== 1. Layers in CNNs
+\
+
+- *Normalizing Layers*
+\
+~~~~首先进行归一化：
+$
+  hat(x)_(i, j) = (x_(i, j) - mu_j) / (sqrt(sigma_j^2 + epsilon))
+$
+~~~~其中：\
+$x_(i,j)$ : 第 $i$ 个样本、第 $j$ 个特征（或通道）的值；\
+$mu_j$ : 第 $j$ 个特征的均值；\
+$sigma_j^2$ : 第 $j$ 个特征的方差；\
+$epsilon$ : 防止除零的小常数
+
+~~~~核心问题：均值和方差是在哪些维度上计算的？这就决定了以下四种 normalization 的核心差异！
+
+#rect[
+  *High-level Idea :* \
+  Learn parameters that let us *_scale / shift_* the input data\
+
+  ① Normalize input data\
+  ② Scale / shift using learned parameters
+]
+
+~~~~因为强行把每层都归一化到均值为 0、方差为 1，可能会限制网络的表达能力。加入可学习的缩放和平移，让网络自己决定：是否需要保留归一化后的分布，还是恢复一部分原始分布。
+
+~~~~所以完整的归一化层是：
+
+$ y = gamma dot frac(x - mu, sqrt(sigma^2 + epsilon)) + beta $
+
+~~~~现在假设特征图张量形状为：
+
+$ (N, C, H, W) $
+
+~~~~其中：$N$：batch size；$C$：通道数；$H$：高度；$W$：宽度。
+
+~~~~下面来看四种normalizations 方法及其差异：
+
+#figure(
+  image("images/Lec6_normalization_layers_intuition.png", width: 100%),
+  caption: [normalization layers],
+)
+
+① Batch Normalization (BN) \
+
+~~~~对每个通道，在 $(N,H,W)$ 上计算均值和方差。\
+
+~~~~也就是跨样本、跨空间位置，对同一个通道做归一化。
+
+适用场景：CNN，batch size 较大时。\
+缺点：batch size 小时，统计量不稳定。
+
+\
+② Layer Normalization (LN)\
+
+~~~~对每个样本，在 $(C,H,W)$ 上计算均值和方差。
+
+~~~~含义：对每个样本的所有通道和空间位置一起归一化。
+
+适用场景：RNN、Transformer。\
+优点：不依赖 batch size
+
+\
+③ Instance Normalization (IN)\
+
+~~~~对每个样本的每个通道，在 $(H,W)$ 上计算均值和方差。
+
+~~~~含义：对每张图的每个通道单独归一化。
+
+适用场景：风格迁移（style transfer）。\
+特点：不依赖 batch，也不混合通道
+
+\
+④ Group Normalization（GN）
+
+~~~~把通道分成若干组，对每个样本的每组通道，在 $(H,W)$ 和组内通道上计算均值和方差。
+
+~~~~含义：介于 Layer Norm 和 Instance Norm 之间。
+
+当 G=1：退化为 Layer Norm；\
+当 G=C：退化为 Instance Norm。
+
+适用场景：batch size 小的情况，如目标检测、分割。\
+优点：不依赖 batch size，效果稳定。
+
+\
+\
+\
+\
+\
+\
+
+- *Dropout*
+\
+#figure(
+  image("images/Lec6_dropout_figure.png", width: 100%),
+  caption: [dropout],
+)
+
+~~~~In each forward pass, randomly set some neurons to zero. Probability of dropping is a hyperparameter; 0.5 , 0.25 are common.
+
+\
+
+~~~~This is actually forcing the network to have a redundant representation, and prevents co-adaptation of features. （注：训练时随机丢弃一些决策特征能让模型不会过度依赖这些特征来做决策！）
+
+\
+
+*Another interpretation* :\
+
+~~~~Dropout is training a large *ensemble* of
+models (that share parameters). Each binary mask is one model.
+
+~~~~And because at *test time* we'll remove _dropout and scale the output acitvations by the dropping out probability_, it's reasonable to think it as an emsemble.
+
+\
+\
+
+
+
+
+
+
+=== 2. Activation Functions
+\
+
+- *Sigmoid*
+
+#figure(
+  image("images/Lec6_sigmoid_figure.png", width: 50%),
+  caption: [sigmoid],
+)
+
+~~~~It's historically popular since they have nice interpretation as a saturating “firing rate” of a neuron.
+
+\
+
+*Key problem* :\
+
+~~~~Large positive or negative values can “kill” the gradients. Many layers of sigmoids → *_smaller and smaller gradients_* in practice.
+
+\
+\
+
+
+
+- *ReLU (Recified Linear Unit)*
+
+#figure(
+  image("images/Lec6_ReLU.png", width: 50%),
+  caption: [ReLU],
+)
+
+*Advantages* :\
+① Does not saturate (in +region) (gradient = 1)\
+② Very computationally efficient\
+③ Converges much faster than sigmoid in practice (e.g. 6x)
+
+\
+*Problems* :\
+① Not zero-centered output\
+② An annoyance: Dead ReLUs when x < 0!
+
+\
+
+
+
+
+
+- *GELU (Guassian Error Linear Unit)*
+
+#figure(
+  image("images/Lec6_GELU_figure.png", width: 70%),
+  caption: [GELU],
+)
+
+*Advantages* :\
+① Very nice behavior around 0\
+② Smoothness facilitates training in practice
+
+\
+*Problems *:\
+① Higher computational cost than ReLU\
+② Large negative values can still have gradient → 0
+
+~~~~It is the mainly used activation function in Transformers today.
+
+\
+
+
+#figure(
+  image("images/Lec6_activation_func_zoo.png", width: 100%),
+  caption: [activation function zoo],
+)
+\
+(the gradient value is similar to cumulative Guassian distribution probability value)
+
+\
+
+#rect[
+  Activations in CNNs are generally placed #underline[after linear operators] (feedforward / linear layer, convolutional layer, etc.)
+]
+
+
+\
+\
+\
+
+
+=== 3. CNN Architectures
+\
+
+- *Case study : VGGNet (2014)*
+
+#figure(
+  image("images/Lec6_VGGNet_architecture.png", width: 100%),
+  caption: [VGG architecture],
+)
+
+~~~~If we compare AlexNet with VGGNet, we see that the change is "Small filters, Deeper networks".
+
+\
+
+~~~~Why *_smaller filters_* ($3 times 3$ Conv) ? \
+~~~~Stack of three $3 times 3$ conv (stride 1) layers
+has same effective receptive field as
+one $7 times 7$ conv layer. (note that the receptive field of $3 times 3$ conv increase by 2 with each depth of the network)
+
+\
+~~~~But deeper stack allows for *_more non-linearities_*. And *_fewer paramers_* : $3 times (3^2 C^2) < 7^2 C^2$ for $C$ channels per layer.
+
+\
+\
+\
+\
+\
+\
+\
+
+
+- *Case Study : ResNet*
+
+~~~~If we continue stacking deeper layers on a "plain" convolutional neural network, we see training and test error both increasing !（这并不是 overfit 导致的）
+
+#figure(
+  image("images/Lec6_deeper_layer_higher_error.png", width: 100%),
+  caption: [deeper layer with higher error],
+)
+
+\
+
+~~~~This might be confusing since deeper networks are bound to have stronger representation ability than shallow networks. \
+
+~~~~And the deeper network should behave *_at least as well as_* the shallow network if we do the thought experiment that #underline[*when we set the extra layers to be indentity function then the deeper network becomes the shallow network* !]
+
+\
+
+~~~~我们认为上面出现的那种深层网络被浅层网络“碾压”的现象应当是一个 optimization problem （深层模型优化更难！）.
+
+\
+
+（注意：此时的优化问题是复杂模型在训练中被卡住了，通常是因为优化困难，可能是因为梯度消失、病态曲率或鞍点，并且这个训练瓶颈并不是因为训练时间不够而导致的！）
+
+\
+
+~~~~正是受到这个思想的启发，我们的直觉是：深层模型至少应当学习得与浅层模型一样好，那么在构造上一个简单的思想实验就是：copying the learned layers from the shallower model and setting additional layers to identity mapping.
+
+
+#figure(
+  image("images/Lec6_copy_from_shallow_model.png", width: 30%),
+  caption: [copy from shallow model + identity],
+)
+
+\
+~~~~进一步地，ResNet 的思路就是：*Use network layers to fit a residual mapping instead of directly trying to fit a desired underlying mapping*.
+
+
+#figure(
+  image("images/Lec6_ResNet_figure1.png", width: 100%),
+  caption: [ResNet],
+)
+\
+~~~~So instead of directly training the complex mapping ($H(x)$) of deeper network, we use layers to fit residual mapping : $F(x) = H(x) - x$. (that's the $delta$ between shallow and deeper network mapping !)
+
+\
+~~~~#underline[前向视角]：如果恒等映射就是最优解的话，那么让网络学习一个零映射比学习一个恒等映射容易得多！这个残差映射 $F(x) = H(x) - x$ 也更容易学习！
+
+\
+
+~~~~#underline[反向视角]：残差连接提供了一条恒等路径（残差流）。反向传播求导时：
+
+$ frac(partial x_(l+1), partial x_l) = frac(partial F(x_l), partial x_l) + 1 $
+
+这个 $+1$ 保证了即使残差分支 $F$ 的梯度很小，梯度仍然可以沿着恒等路径无损回传，不会指数衰减消失。
+
+
+
+
+~~~~Residual blocks help us use more data to build more complex model !
+\
+
+~~~~Very deep networks are using residual connections.
+
+#figure(
+  image("images/Lec6_ResNet_figure2.png", width: 100%),
+  caption: [ResNet full architecture],
+)
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+
+=== 4. Weight Initialization
+\
+
+- *Case Analysis*
+
+~~~~If we intialize the weight values to be too small, then all activations tend to 0 for deeper network layers.
+\
+
+~~~~If we initialize them to be too large, then activations blow up quickly. (mean and deviation blow up)
+
+~~~~因此初始化的目的就是：每一层的输出（激活值）方差大致保持一致，不缩不放（输入与输出方差一样，不变）
+
+\
+\
+\
+
+
+
+- *Kaiming / MSRA Initialization*
+
+这是一个专门为 ReLU 网络设置的初始化方法
+
+~~~~以前的 Xavier 初始化做法：我们初始化权重参数分布为：
+$ sigma_w = frac(1, sqrt(D_"in")) $
+
+或者
+
+$ sigma_w = sqrt(frac(2, D_"in" + D_"out")) $
+
+\
+
+~~~~但是注意 Xavier 初始化假设激活函数是线性的，#underline[而 ReLU 会把一半神经元置零，导致方差减半]。所以我们改用这样的初始化：
+$ sigma_w = sqrt(frac(2, D_"in")) $
+
+
+\
+\
+\
+
+=== 5. Data Preprocessing
+\
+对于图像数据，现代 CNN 几乎都采用同一种预处理方法：
+
+~~~~#underline[对每个通道，减去该通道的均值，再除以该通道的标准差]
+
+\
+
+*Advantages *:
+
+① 加速收敛：归一化后各通道尺度一致，损失曲面更接近圆形，梯度下降更顺畅。\
+② 避免通道主导：如果某个通道数值范围大，它的梯度也会大，可能主导参数更新。归一化后所有通道公平参与。\
+③ 数值稳定性：将输入预处理为在 0 附近且方差为 1，激活值和梯度不会过大或过小，训练更稳定。
+
+
+
+\
+
+
+
+=== 6. Data Augmentation
+\
+~~~~首先我们回顾一下正则化 (regularization) ：\
+
+① Training: Add some kind of randomness \
+② Testing: Average out randomness (sometimes approximate)
+
+\
+~~~~正则化实际上使用的是集成学习(Emsemble)的思想：\
+
+~~~~每次训练时加入不同的随机性，相当于在训练很多个略有不同的模型；测试时把这些模型的效果平均起来；平均后的模型比单个模型更鲁棒，不容易过拟合
+
+~~~~之前我们讲过 dropout，现在来讲 *Data augmentation* ，这是数据层面的一种正则化手段。
+
+\
+
+常见方法：
+
+\
+- - *Horizontal flips*
+
+把图像左右翻转。\
+对于大多数分类任务（猫、狗、汽车），翻转不改变类别
+
+\
+
+- - *Random Crops and Scales*（随机裁剪和缩放）
+
+
+1 ) ResNet 训练策略
+
+随机选一个 $L in [256, 480]$；\
+把训练图像的短边缩放到 $L$；\
+随机裁剪一个 $224 times 224$ 的 patch。
+
+~~~~这样每次看到的都是图像的不同部分和不同尺度。
+
+~~~~测试时：不做随机裁剪，而是用固定的一组裁剪，取平均。
+
+\
+2 ) ResNet 测试策略（Test Time Augmentation）
+
+把图像缩放到 5 个尺度：$ \{224, 256, 384, 480, 640\} $\
+每个尺度取 10 个 $224 times 224$ 裁剪：4 个角 + 中心，加上水平翻转；\
+总共 $5 times 10 = 50$ 个裁剪，分别预测，取平均。
+
+这是 Test Time Augmentation（TTA）。
+
+\
+
+- - *Color Jitter*（颜色抖动）
+
+~~~~随机改变图像的对比度和亮度。
+
+简单做法 :\
+随机调整亮度；随机调整对比度；随机调整饱和度；随机调整色调。\
+
+~~~~这样模型不会过度依赖颜色信息
+
+\
+
+- - *Cutout*
+
+~~~~训练时，随机把图像中的某些矩形区域置零（变成黑色或灰色）。\
+~~~~测试时使用完整图像。
+
+效果：迫使模型不能只依赖图像的某一块区域；学会从多个区域综合判断；对小数据集（如 CIFAR）效果很好。
+
+
+\
+\
+
+~~~~进行了 data augmentation 操作之后我们相当于也是很好地利用了数据，让模型能够从多个角度学习已有数据，直观上就是 “对输入图加噪点防止过拟合” 这一种正则化思想。
+
+
+
+\
+\
+\
+\
+\
+\
+\
+
+=== 7. Transfer Learning
+\
+~~~~If we don't have a lot of data, we can still train CNNs.
+
+\
+
+*1 ) Step 1 : Get a model that is trained on a large dataset (ImageNet).*
+
+#figure(
+  image("images/Lec6_transfer_learning_figure1.png", width: 20%),
+  caption: [step 1: train on a large dataset],
+)
+
+\
+
+*2 ) Step 2 : Freeze the deep layers and only change the last linear layer to train on our given small dataset.*
+
+#figure(
+  image("images/Lec6_transfer_learning_figure2.png", width: 60%),
+  caption: [step 2: change the last linear layer and train],
+)
+
+\
+
+*3 ) Step 3* : If our given dataset is bigger, then we'd finetune the former pretrained model with our given dataset.
+
+#figure(
+  image("images/Lec6_transfer_learning_figure3.png", width: 60%),
+  caption: [step 3: finetune the pretrained model],
+)
+
+
+\
+\
+
+~~~~We can draw this empirical method table :
+
+
+
+#table(
+  columns: (auto, auto, auto),
+  align: (left, left, left),
+  stroke: 0.5pt,
+  inset: 6pt,
+  table.header([], [*very similar dataset*], [*very different dataset*]),
+  [*very little data*],
+  [Use Linear \ Classifier on \ final layer],
+  [Try another \ pretrained \ model or collect \ more data],
+
+  [*quite a lot of data*],
+  [Finetune all \ model layers],
+  [Either finetune \ all model layers \ or train from \ scratch!],
+)
+
+\
+\
+\
+\
+\
+
+
+
+=== 8. Hyperparameter Selection
+\
+
+一个7步流程：
+
+
+1. #underline[检查初始损失] ：用随机初始化权重，跑一次前向传播；看初始损失值是否合理。这一步目的是验证网络结构和初始化是否正确。
+
+2. #underline[过拟合一个小样本]：取一小部分训练数据（比如 5~10 张图）；关掉正则化（或设得很小）；训练几百步；看训练准确率能否达到 100%。这一步目的是验证网络有能力学习。
+
+3. #underline[找到能让损失下降的学习率]：使用上一步的网络结构；使用全部训练数据；打开很小的 weight decay；尝试不同的学习率，看哪个能在 100 次迭代内让损失显著下降。这一步目的是确定学习率的合理量级。
+
+4. #underline[粗网格搜索，训练 1\~5 个 epoch] ：选定几个超参数：学习率、正则化强度、网络大小等；每个组合训练 1\~5 个 epoch；记录验证集准确率。这一步目的是在合理范围内粗筛超参数组合。
+
+5. #underline[细化网格，训练更久]：取粗筛中表现最好的几个组合；在它们附近细化网格；训练更久（比如 10~20 个 epoch）；继续比较验证集表现。
+
+6. #underline[看损失和准确率曲线（3种曲线情况）]：
+
+#figure(
+  image("images/Lec6_accuracy_case1.png", width: 70%),
+  caption: [case 1: need more training],
+)
+
+#figure(
+  image("images/Lec6_accuracy_case2.png", width: 80%),
+  caption: [case 2: overfit],
+)
+
+#figure(
+  image("images/Lec6_accuracy_case3.png", width: 80%),
+  caption: [case 3: underfit],
+)
+
+
+7. #underline[回到第 5 步，循环迭代（调参是一个迭代过程）]
+
+
+
+\
+\
+
+- 2种搜索策略：
+
+#figure(
+  image("images/Lec6_hyperparameter_2_search_method.png", width: 100%),
+  caption: [2 search methods],
+)
+*Grid Search*（网格搜索）：在每个超参数上取固定的一组值；组合成网格，逐个尝试。
+
+~~~问题：维度灾难：超参数越多，组合数指数增长；计算量巨大；很多组合其实效果差不多，浪费计算。
+
+\
+*Random Search*（随机搜索）：在每个超参数的范围里随机采样；不需要遍历所有组合。
+
+~~~~优势：研究表明，随机搜索通常比网格搜索更高效；因为通常只有少数几个超参数真正重要；随机搜索能更密集地覆盖重要参数，而网格搜索会在不重要的参数上浪费大量试验。
+
+\
+结论：优先使用随机搜索，而不是网格搜索。
+
+
+
+
+
+
+
+
+
+#pagebreak()
+
+
+
+
+
+
+
+
+
+
+
+
+#place(top, scope: "parent", float: true)[
+  #align(center + horizon)[  // horizon 让它垂直居中页顶区域，更美观
+    #text(font: "Georgia", weight: "bold", size: 24pt)[§ Lec VI]  //
+    #v(0em)
+    #line(length: 100%, stroke: 1pt)  // 可选：加一条装饰线
+  ]
+]
+
+== RNN (taught by Zane Durante)
+\
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#pagebreak()
 
 
 
