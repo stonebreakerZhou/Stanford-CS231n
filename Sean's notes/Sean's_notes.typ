@@ -2975,7 +2975,7 @@ $ sigma_w = sqrt(frac(2, D_"in")) $
 
 #place(top, scope: "parent", float: true)[
   #align(center + horizon)[  // horizon 让它垂直居中页顶区域，更美观
-    #text(font: "Georgia", weight: "bold", size: 24pt)[§ Lec VI]  //
+    #text(font: "Georgia", weight: "bold", size: 24pt)[§ Lec VII]  //
     #v(0em)
     #line(length: 100%, stroke: 1pt)  // 可选：加一条装饰线
   ]
@@ -2984,12 +2984,583 @@ $ sigma_w = sqrt(frac(2, D_"in")) $
 == RNN (taught by Zane Durante)
 \
 
+outline :\
+① Recurrent Neural Networks (RNNs)\
+② sequence modeling (assumed fixed-length inputs so far)\
+③ Simple models commonly used before the era of
+transformers\
+④ RNNs and some variants\
+⑤ Relation to modern state-space models (e.g. Mamba)
+
+
+\
+\
+
+=== 1. Recurrent Neural Network (RNN)
+\
+~~~~序列任务有很多种形式，但都可以用 RNN 统一处理 :
+
+#figure(
+  image("images/Lec7_sequence_tasks.png", width: 100%),
+  caption: [sequence tasks],
+)
+
+\
+
+What is RNN ?
+
+#figure(
+  image("images/Lec7_RNN_simple_figure.png", width: 30%),
+  caption: [RNN simple figure],
+)
+
+~~~~The basic idea is that we have a input sequence of $x$ and an output sequence of $y$. RNN has this recurrent nature（图中箭头）: *RNNs have an "internal state" (hidden state) that is updated as a sequence is processed*.
+
+\
+
+~~~~We can do this *unrolled RNN diagram* :
+
+#figure(
+  image("images/Lec7_unrolled_RNN_diagram.png", width: 100%),
+  caption: [unrolled RNN diagram],
+)
+
+\
+\
+\
+- *Hidden state update rule*
+
+~~~We can process a sequence of vectors x by applying a *_recurrence_* formula at every time step :
+
+#align(center)[
+  #rect[
+    *$ h_t = f_W (h_(t-1), x_t) $*
+  ]]
+
+where $h_t$ is the new state, $f_W$ is some function with parameters $W$, $h_(t-1)$ is the old state and $x_t$ is the input vector at some time step. (convert the hidden state to the output)
+\
+
+~~~~#underline[Notice: the *same* function $f$ and the *same* set of parameters $W$ are used at every time step.]
+
+
+\
+
+
+
+- *Output generation*
+
+~~~~To get the actual output :
+#align(center)[
+  #rect[
+    *$ y_t = f_(W_(h y)) (h_t) $*]]
+
+where $y_t$ is the output, $f_(W_(h y))$ is another function with paramers $W_(h y)$, and $h_t$ is the new state.
+
+
+\
+
+
+- *Vanilla (Elman) RNN*
+
+~~~~We use :
+$
+  h_t & = tanh (W_(h h) h_(t-1) + W_(x h) x_t) \
+  y_t & = W_(h y) h_t
+$
+
+\
+
+- *RNN Concrete Simple Example*
+
+~~~~Let's manually create a recurrent network for detecting repeated 1s. It's a "many to many" sequence modeling task.
+
+#figure(
+  image("images/Lec7_RNN_concrete_simple_eg.png", width: 30%),
+  caption: [input-output pair example],
+)
+
+~~~~For simplicity, we can design :
+$
+  h_t & = "ReLU"(W_(h h)h_(t-1) + W_(x h)x_t) \
+  h_t & = mat("current"; "Previous"; "1") \
+  y_t & = "ReLU"(W_(h y) h_t)
+$
+
+① $W_(x h) x_t$ 此时 $x_t$ 就是当前的数值，由于hidden state 是一个三维向量，故 $W_(x h)$ 也就是一个三维向量。两者的乘积的第一维应当代表当前所看到的数值，故设置：
+$
+  W_(x h) = mat(1; 0; 0)
+$
+
+~~~~这样当前位置 $x = 0$ 时 $->$ $W_(x h) x = mat(0; 0; 0)$; 当前位置 $x = 1$ 时 $->$ $W_(x h) x = mat(1; 0; 0)$
+
+\
+
+② 接着我们来设置：
+$
+  W_(h h) = mat(0, 0, 0; 1, 0, 0; 0, 0, 1)
+$
+~~~~第一行全设为0因为当前状态完全由 $W_(x h) x$ 决定而与前一个隐态无关；第二行 $mat(1, 0, 0)$ 相当于是将上一个隐态$h_(t-1)$ 的 current 值拷贝到当前隐态的 previous 值处；第三行则是保持第三维的1不变。
+
+\
+
+③ 我们最后设置：
+$
+  W_(h y) = mat(1; 1; -1)
+$
+~~~~这样得到的值经过 ReLU 后能够得到正确的 $y_t$ 输出值！
+
+
+\
+
+
+
+- *Computational Graph of RNN*
+\
+Note that we re-use the same weight matrix at every time-step.
+
+\
+- - *Many to Many*
+
+#figure(
+  image("images/Lec7_RNN_computational_graph_many-to-many.jpg", width: 100%),
+  caption: [many to many],
+)
+每一步都算损失，最后求和或是求平均
+
+\
+
+- - *Many to One*
+
+#figure(
+  image("images/Lec7_RNN_computational_graph_many-to-one.png", width: 100%),
+  caption: [many to one],
+)
+
+只在最后一个时间步有一个输出并得到一个损失值
+
+\
+
+- - *One to Many*
+
+#figure(
+  image("images/Lec7_RNN_computational_graph_one-to-many_figure1.png", width: 100%),
+  caption: [one to many : figure1],
+)
+
+#figure(
+  image("images/Lec7_RNN_computational_graph_one-to-many_figure2.png", width: 100%),
+  caption: [one to many : figure2],
+)
+
+#figure(
+  image("images/Lec7_RNN_eg_character_LM.png", width: 80%),
+  caption: [RNN e.g. character-level LM],
+)
+
+~~~~这种情况下每一个时间步都会有一个输出以及对应的损失，最后总损失会对所有时间步的损失进行求和（或求平均）。
+
+\
+\
+\
+
+
+
+- *Backpropagation through time (BPTT)*
+\
+~~~~Forward through entire sequence to compute loss, then backward through entire sequence to compute gradient.
+
+
+~~~~RNN 的参数 $W_(h h), W_(x h), W_(h y)$ 在所有时间步共享。\
+
+~~~~前向传播时，同一个 $W_(h h)$ 被用了 $T$ 次。\
+~~~~反向传播时，每个时间步都会算出“我对 $W_(h h)$ 的梯度贡献”。
+\
+
+~~~~最终 $W_(h h)$ 的梯度是每个时间步所有梯度的贡献总和：
+
+$ frac(partial L, partial W_(h h)) = sum_(t=1)^T frac(partial L, partial W_(h h)) |_t $
+
+~~~~然后只用这个总梯度更新一次：
+
+$ W_(h h) arrow.l W_(h h) - eta frac(partial L, partial W_(h h)) $
+
+~~~~所以：每个时间步都有梯度贡献，但只更新一次参数。
+
+
+
+~~~~many-to-one 情况下损失值由最后一个时间步计算；而many-to-many 情况下每个时间步都有输出与损失，最终损失值一般取成所有时间步的损失值之和。
+
+
+$ L = sum_(t=1)^T L_t #h(1em) ("最终损失值") $
+
+~~~~对 $W_(h h)$ 求导，拆分为每个时间步对 $W_(h h)$ 的梯度贡献：
+
+$
+  frac(partial L, partial W_(h h)) = sum_(t=1)^T frac(partial L, partial h_t) dot frac(partial h_t, partial W_(h h)) |_"直接"
+$
+
+但注意：现在 $frac(partial L, partial h_t)$ 有两部分：
+
+$
+  frac(partial L, partial h_t) = underbrace(frac(partial L_t, partial h_t), "当前输出") + underbrace(frac(partial L, partial h_(t+1)) dot frac(partial h_(t+1), partial h_t), "后续时间步")
+$
+
+① 第一项：当前时间步有输出，直接贡献梯度；\
+② 第二项：后续时间步的损失通过递推传回来。
+
+~~~~所以 many-to-many 中，每个时间步的梯度贡献更直接，因为每一步都有输出损失直接贡献梯度。
+
+\
+
+~~~~无论是 many-to-one 还是 many-to-many 类型，最终梯度值都与 $(W_(h h)^T)^n$ （以及激活函数导数的连乘项）有关。这可能会导致梯度爆炸/消失。
+
+\
+
+~~~~于是我们可以使用 *Truncated Backpropagation through time (TBPTT)* :
+
+#figure(
+  image("images/Lec7_truncated_backpropagation_through_time.png", width: 100%),
+  caption: [truncated backprop through time],
+)
+
+~~~~标准的 BPTT 前向时把整个序列跑完，计算总损失；反向时则从最后一步开始，一直回传到第一步；梯度需要穿过整个序列。
+\
+
+~~~~#underline[TBPTT 则把长序列切成若干段（chunks），每段分别做前向和反向。] 注意所有段都是共享同一套参数，所以每一段的反向传播都会更新一次这一套参数。当前这一段更新完后，把输出的隐层继续给下一段，然后继续做前向+反向。
+
+
+
+\
+\
+\
+
+
+- *Interpretable Cells*
+\
+~~~~在 CNN 中，我们可以可视化第一层卷积核，看到它们学到了边缘、颜色等特征。\
+~~~~但 RNN 的隐藏状态是一个高维向量，随时间步不断变化，我们很难直接理解每个维度在做什么。
+
+~~~~于是作者提出一个问题：RNN 的隐藏状态中，是否也存在一些“可解释的神经元”？\
+~~~~即：有没有某个神经元，在特定输入模式出现时激活，其他时候不激活？如果有，我们就能理解它在追踪什么。
+
+\
+（补充：注意”神经元“的概念：一个神经元的输出是一个标量，在 RNN 中，因为隐层状态 $h_t$ 是一个高维向量，我们就可以说这个高维向量每一维就是一个神经元）
+
+\
+~~~~该论文最终在字符级语言模型中，观察到一些LSTM单元（神经元）会自发地学习去追踪输入序列中特定的、可解释的模式。
+
+~~~~具体例子：这些神经元会分别负责追踪代码行的长度、引号的开闭、括号的嵌套深度，或是检测 if 语句等。
+
+~~~~意义：这说明RNN并非一个完全无法理解的“黑盒”。它的隐藏状态中，确实存在有明确分工、负责处理特定信息的单元。
+
+\
+\
+\
+\
+\
+
+- *RNN Tradeoffs*
+
+- - *RNN Advantages* :
+① Can process any length of the input (no context length)\
+② Computation for step t can (in theory) use \ information from many steps back \
+③ Model size does not increase for longer input \
+④ The same weights are applied on every timestep, so there is symmetry in how inputs are processed.
+
+\
+- - *RNN Disadvantages* :
+① Recurrent computation is slow \
+② In practice, difficult to access information from many steps back （因为我们把所有信息都塞进隐层 $h_t$ 中，这会导致随着序列变长我们总会损失一些信息）
+
+
+\
+\
+\
+
+- *RNN Applications for CV*
+\
+*① Image Captioning*\
+
+*② Visual Question Answering (VQA)*\
+
+*③ Visual Dialog* : Conversations about images
+
+\
+
+- - *Applied Model Architecture*
+\
+CNN + RNN (LSTM)
+
+CNN for coding the image, and outputs the initial hidden state for RNN.
+
+#figure(
+  image("images/Lec7_CNN+RNN.png", width: 100%),
+  caption: [CNN + RNN],
+)
+
+~~~~Here we remove the last few (FC) layers of the original CNN and get a feature vector(after pooling) $v$.
+
+\
+
+$v$ 有两种使用方法：
+
+法一：$v$ 只用来初始化 RNN 的隐层 $h_0$ :
+$
+  h_0 = W_v v
+$
+
+法二 ：$v$ 每一步都参与：
+
+$ h_t = tanh(W_(x h) x_t + W_(h h) h_(t-1) + W_(i h) v) $
+
+~~~~这样相当于每一个时间步都可以”看到“ $v$， $v$ 是每一步都可见的上下文信息，是贯穿整个序列的条件信息。
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+
+- *Multilayer RNNs*
+\
+#figure(
+  image("images/Lec7_multilayer_RNN.png", width: 80%),
+  caption: [multilayer RNN figure],
+)
+
+~~~~其实就是把多层 RNN 堆叠在一起，核心思想：第一层的输出序列，作为第二层的输入序列；第二层的输出，作为第三层的输入；以此类推......
+\
+
+#figure(
+  image("images/Lec7_multilayer_RNN_structure.png", width: 100%),
+  caption: [multilayer RNN structure],
+)
+
+~~~~Each layer will have a set of separate shared weights.
+
+
+\
+\
+\
+\
+\
+\
+
+- - *Vanilla RNN Gradient Flow*
+
+#figure(
+  image("images/Lec7_single_RNN_gradient_flow.jpg", width: 70%),
+  caption: [single RNN gradient flow],
+)
+
+The update rule is :
+$
+  h_t & = tanh(W_(h h)h_(t-1) + W_(x h)x_t) \
+      & = tanh(mat(W_(h h), W_(h x)) mat(h_(t-1); x_t)) \
+      & = tanh(W mat(h_(t-1); x_t))
+$
+
+Then we can get the gradient is :
+$
+  (partial h_t) / (partial h_(t-1)) = tanh ' (W_(h h) h_(t-1) + W_(x h) x_t) W_(h h)
+$
+
+
+#figure(
+  image("images/Lec7_vanilla_RNN_gradient_flow.png", width: 100%),
+  caption: [RNN gradient flow in backprop],
+)
+
+Now we take a look at the backpropagation :
+$
+  (partial L) / (partial W) sum_(t = 1)^T (partial L_t) / (partial W)
+$
+
+where
+$
+  (partial L_T) / (partial W) &= (partial L_T) / (partial h_T) (partial h_t) / (partial h_(T-1)) dots (partial h_1) / (partial W)\
+  &= (partial L_T) / (partial h_T) (product_(t=2)^T (partial h_t) / (partial h_(t-1))) (partial h_1) / (partial W)
+$
+
+Now we plug in $(partial h_t) / (partial h_(t-1))$ , and then get :
+$
+  (partial L_T) / (partial W) = (partial L_T) / (partial h_T) (product_(t=2)^T #text(fill: blue)[$tanh'(W_(h h)h_(t-1) + W_(x h)x_t)$]) #text(fill: red)[$W_(h h)^(T-1)$] (partial h_1) / (partial W)
+$
+
+Note that #underline[the blue term is almost always $<1$], then we get *_vanishing gradients_* !
+$$
+
+\
+\
+
+~~~~Even we assume that there's no non-linearity or we pick some activation functions that don't have this issue, it still has problems when we look at *$W_(h h)^(T-1)$* : if its largest singular value $>1$ then we'd get exploding gradients; else its largest singular value $<1$ then we'd get vanishing gradients.
+
+\
+
+~~~~In this case, if we have exploding gradients, then we could do *_gradient clipping_* : scale the gradient if its norm is too big ; _*but if we have vanishing gradients, then we could only change the architecture of RNN !*_
+
+\
+\
+\
+\
+\
+\
+
+
+- *LSTM* (a historical note)
+\
+~~~~First, we have *four gates* :\
+
+i: Input gate, whether to write to cell\
+f: Forget gate, Whether to erase cell\
+o: Output gate, How much to reveal cell\
+g: Gate gate (?), How much to write to cell
+$
+  mat(i; f; o; g) = mat(sigma; sigma; sigma; tanh) W mat(h_(t-1); x_t)
+$
+
+The computation above is done this way intuitively :
+
+#figure(
+  image("images/Lec7_gate_intuitive_computation.png", width: 100%),
+  caption: [LSTM gate intuitive computation],
+)
+
+
+~~~~Then we define *cell state and hidden state* :
+$
+  c_t = f hadamard c_(t-1) + i hadamard g\
+  h_t = o hadamard tanh(c_t)
+$
+
+\
+
+~~~~Now we take a closer look at the *gradient flow* of LSTM :
+
+#figure(
+  image("images/Lec7_single_LSTM_gradient_flow_figure.png", width: 100%),
+  caption: [LSTM gradient flow],
+)
+
+~~~~看 $c_t$ 到 $c_(t-1)$ 的梯度：
+
+$ frac(partial c_t, partial c_(t-1)) = f_t $
+
+~~~~只有逐元素乘法，没有矩阵乘法，没有 $tanh$ 导数。如果 $f_t approx 1$，那么梯度近乎无损传回。整条传导路径为：
+$
+  c_0 <- c_1 <- c_2 <- dots
+$
+
+~~~~这是一条无中断的梯度流！(uninterrupted gradient flow !)
+
+#figure(
+  image("images/Lec7_LSTM_uninterrupted_gradient_flow.png", width: 100%),
+  caption: [uninterrupted gradient flow],
+)
+\
+
+~~~~对比普通 RNN：
+
+$ h_t = tanh(W_(h h) h_(t-1) + W_(x h) x_t) $
+
+~~~~每一步都经过 $tanh$，信息被压缩；每一步都乘 $W_(h h)$，梯度容易衰减；隐藏状态被完全覆盖，旧信息无法直接保留。
+
+\
+~~~~而LSTM的 cell state 是门控简单加法（不是完全覆盖！），信息、梯度更易保留。
+
+\
+\
+
+- - *Similarity to ResNet*
+
+~~~~The idea of directly adding outputs and skipping activation functions and others is similar to the idea of residual connecting !
+\
+
+~~~~There's difference that LSTM deals with long time sequences while ResNet deals with deep layers.
+
+
+
+\
+\
+
+- - *Do LSTMs solve the vanishing gradient problem ?*
+
+~~~~The LSTM architecture makes it easier for the RNN to preserve information over many timesteps
+
+~~~~e.g. if $f = 1$ and $i = 0$, then the information of that cell is preserved indefinitely.\
+
+~~~~By contrast, it's harder for vanilla RNN to learn a recurrent weight matrix $W_h$ that preserves info in hidden state
+
+~~~~LSTM doesn't guarantee that there is no vanishing/exploding gradient, but #underline[*_it does provide an easier way for the model to learn long-distance dependencies_*]
+
+
+\
+\
+\
+\
+\
+
+- *Modern RNNs*
+
+现代 RNN 有时被称为 状态空间模型（State Space Models, SSMs，因为现代 RNN 本质上是在维护一个隐藏状态 $h_t$​，并让它随输入逐步演化。这种“状态随输入演化”的视角，就是状态空间模型。
+
+所有 RNN 的共同点：用一个隐藏状态 $h_t$​ 压缩过去的所有信息。
+
+\
+
+主要优势：
+
+*① Unlimited context length*（上下文长度不受限）
+
+~~~~传统 Transformer 的注意力机制：每个 token 都要和之前所有 token 计算注意力；上下文长度受限于显存和计算量；通常有最大窗口限制，比如 512、2048、8192。
+
+~~~~现代 RNN / SSM：每步只依赖前一步的隐藏状态；不需要保存所有历史 token；理论上可以处理任意长度的序列；适合流式数据、超长文本、音频、视频。
+
+\
+
+*② Compute scales linearly with sequence length*（计算量随序列长度线性增长）
+
+Transformer随着序列增长计算量成平方次增长；而RNN / SSM随着序列增长计算量为线性增长！
 
 
 
 
 
 
+
+
+
+
+
+
+#pagebreak()
+
+
+
+
+
+
+
+
+
+
+
+#place(top, scope: "parent", float: true)[
+  #align(center + horizon)[  // horizon 让它垂直居中页顶区域，更美观
+    #text(font: "Georgia", weight: "bold", size: 24pt)[§ Lec VIII]  //
+    #v(0em)
+    #line(length: 100%, stroke: 1pt)  // 可选：加一条装饰线
+  ]
+]
+
+==
 
 
 
@@ -3029,8 +3600,4 @@ $ sigma_w = sqrt(frac(2, D_"in")) $
 
 
 #pagebreak()
-
-
-
-
 
