@@ -4286,8 +4286,7 @@ Output: Set of vectors $y$\
 
 \
 \
-\
-\
+
 
 
 - - *Vision Transformers (ViT)*
@@ -4297,7 +4296,8 @@ Output: Set of vectors $y$\
   caption: [ViT],
 )
 
-把图像切成小块（patches），每个 patch 当成一个 token；每个 patch 展平成一个向量，然后通过一个线性层投影到模型维度 $D$；因为 Transformer 不知道顺序，需要加上位置编码；最后送入 Transformer 即可。
+~~~~把图像切成小块（patches），每个 patch 当成一个 token；每个 patch 展平成一个向量，然后通过一个线性层投影到模型维度 $D$；因为 Transformer 不知道顺序，需要加上位置编码；最后送入 Transformer 即可。\
+~~~~Transformer 输出经过全局平均池化后得到的汇总向量送入线性层最后得到分类。
 
 
 
@@ -4495,5 +4495,710 @@ Example: Gemma4 26B-A4B (4/2/2026)
 
 
 
+
+
 #pagebreak()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#place(top, scope: "parent", float: true)[
+  #align(center + horizon)[  // horizon 让它垂直居中页顶区域，更美观
+    #text(font: "Georgia", weight: "bold", size: 24pt)[§ Lec IX]  //
+    #v(0em)
+    #line(length: 100%, stroke: 1pt)  // 可选：加一条装饰线
+  ]
+]
+
+== Detection, Segmentation, Visualization (taught by Ehsan Adeli)
+
+\
+\
+outline :
+$
+  "1. Computer Vision Tasks" cases(
+    "Semantic Segmentation",
+    "Object Detection",
+    "Instance Segmentation",
+  )
+$
+$
+  "2. Visualization" cases(
+    "Model Layers Visualization",
+    "Saliency Maps",
+    "CAM & Grad-CAM",
+  )
+$
+
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+=== 1. Semantic Segmentation
+\
+*Task* :\
+~~~~Label each pixel in the image with a category label. Don’t differentiate instances, only care about pixels.
+
+#figure(
+  image("images/Lec9_semantic_segmentation_eg1.png", width: 100%),
+  caption: [semantic segmentation $e.g^1$],
+)
+
+\
+~~~~To label each pixel, it's impossible to classify without context. So how to include context ?
+
+
+
+- *Idea 1 : Sliding Window*\
+
+~~~~We can slide a window and extract patches from the full image and classify center pixel with CNN.
+
+#figure(
+  image("images/Lec9_semantic_segmentation_idea1_sliding_window.jpg", width: 100%),
+  caption: [sliding window],
+)
+
+*Problem* : It's very _inefficient_ ! Not reusing shared features between overlapping patches.
+
+
+\
+
+
+
+- *Idea 2 : Pure Convolution*\
+
+~~~~Design a network with only convolutional layers  without downsampling operators to make predictions  for pixels all at once!
+
+#figure(
+  image("images/Lec9_semantic_segmentation_idea2_pure_convolution.png", width: 100%),
+  caption: [pure convolution],
+)
+
+
+~~~~如果我们在卷积层不加入池化，不做stride$>$1的卷积，不做下采样，每一步都通过 padding 来使得卷积结果尺寸与输入尺寸完全相同，那么经过多层卷积后，输出特征图的空间尺寸就仍然是 $H times W$。
+
+\
+*Problem* :\
+① Convolutions at original image resolution will be
+very expensive.\
+② Receptive field is too small to learn high-level semantic. So we have to stack many layers.
+
+
+
+
+
+- *Idea 3 : Convolution with Down+Up Sampling*
+
+#figure(
+  image("images/Lec9_semantic_segmentation_idea3_convolution_with_down+up_sampling.png", width: 100%),
+  caption: [convolution with down+up-sampling],
+)
+
+~~~~Design network as a bunch of convolutional layers, with #text(fill: red)[*_downsampling_*] and #text(fill: blue)[*_upsampling_*] inside the network!
+
+\
+~~~~We've learned *down-sampling* before : *_pooling , strided convolution_* ......
+
+\
+~~~~Now how can we implement *up-sampling* ?
+
+\
+\
+\
+
+
+
+
+- *UpSampling*
+\
+- - *In-Network upsampling: "Unpooling"*
+
+*① Nearest Neighbor :*
+
+#figure(
+  image("images/Lec9_upsampling_nearest_neighbor.png", width: 80%),
+  caption: [nearest neighbor],
+)
+
+
+
+*② "Bed of Nails" :*
+
+#figure(
+  image("images/Lec9_upsampling_bed_of_nails.png", width: 80%),
+  caption: [bed of nails],
+)
+
+
+
+
+
+- - *In-Network upsampling: "Max Unpooling"*
+
+~~~~Max Pooling 时记录最大值的位置索引，Max Unpooling 时把值放回原来的位置，其他位置填 0.\
+~~~~不需要学习参数，并且能保留 Max Pooling 时选中的位置信息。
+
+#figure(
+  image("images/Lec9_upsampling_max-unpooling_figure1.jpg", width: 100%),
+  caption: [max unpooling],
+)
+
+\
+~~~~Note : Corresponding pairs of downsampling and upsampling layers !
+
+#figure(
+  image("images/Lec9_upsampling_max-unpooling_figure2.png", width: 80%),
+  caption: [max unpooling correspondence relation],
+)
+
+
+\
+\
+
+
+
+- - *Learnable Upsampling : Strided Transposed Convolution*
+\
+*Recall* : normal $3 times 3$ convolution with stride 1, pad 1.
+
+#figure(
+  image("images/Lec9_normal_3by3_conv_with_s1p1.png", width: 100%),
+  caption: [normal convolution],
+)
+
+
+
+~~~~普通卷积可以写成矩阵乘法形式！下面用一个简单的例子可视化：
+
+#set math.mat(delim: "[")
+$
+  I = mat(1, 2, 3, 4; 5, 6, 7, 8; dots; dots) in [4 times 4]\
+  "kernel" = mat(1/2, 1/2; 1/2, 1/2) in [2 times 2]
+$
+
+~~~~易知卷积结果为：
+$
+  O = mat(7, 9, 11; dots.c; dots.c) in [3 times 3]
+$
+
+
+~~~~现在把 $I, O$ flatten成列向量（按行优先）：
+$
+  I."flatten" = mat(1; 2; 3; dots.v) in RR^(16)\
+  O."flatten" = mat(7; 9; 11; dots.v) in RR^9
+$
+
+~~~~现在我们就是要把这一整套操作改写为：
+$
+  O."flatten" = R times I."flatten"\
+  R in [9 times 16]
+$
+
+~~~~如果要直接构造写出矩阵 $R$ 比较麻烦因为很多地方需要填充为0，由于 $R$ 的每一个行向量与 $I."flatten"$ 的点积就是在一个位置进行一次卷积，所以我们分行向量来分析 $R$ ：
+
+~~~~比如 kernel 一行一行移动，移动到第二个位置，此时感受野卷积为：
+$
+  W_2 = mat(0, 1/2, 1/2, 0; 0, 1/2, 1/2, 0; dots.c; dots.c)
+$
+
+~~~~可以发现直接把 $W_2$ flatten 之后就能得到 $R$ 的第二行行向量！
+
+~~~~最后可以顺利将卷积操作改写成矩阵乘法：
+$
+  O."flatten" = R times I."flatten"
+$
+
+~~~~这是 down sampling 的矩阵表示，那么进一步，假如我们要进行 up sampling，那么：
+$
+  "recovered"."flatten" = R^T times O."flatten"\
+  R^T in [16 times 9]
+$
+
+~~~~注意 $R^T$ 的形状，所以转置卷积就是要学习这样一个矩阵实现“逆卷积”的操作（注意 $R^T$ 不一定就是正向卷积的操作矩阵 $R$ ！）
+
+\
+\
+\
+\
+\
+\
+\
+
+- *Architecture Implementation : U-Net*
+
+#figure(
+  image("images/Lec9_U-Net.jpg", width: 100%),
+  caption: [U-Net],
+)
+
+~~~~可以看出 U-Net 左侧在做 down sampling，提取高层语义特征，右侧则进行 up sampling.\
+
+~~~~中间是一个 skip connection : 因为左侧 Encoder 在下采样降分辨率的过程中，不可避免地丢失了像素级的精细位置和边缘信息。所以将 Encoder 浅层提取到的高分辨率空间特征图，直接跨层复制并与 Decoder 对应层的特征图进行通道拼接，这样融合了 Encoder 的“精准位置/边缘”和 Decoder 的“高层语义”。
+
+
+\
+\
+
+
+
+
+=== 2. Object Detection
+\
+
+- *Single Object Detection*
+
+Goal : 分类 + 定位
+
+#figure(
+  image("images/Lec9_single_object_detection.png", width: 100%),
+  caption: [single object detection],
+)
+
+~~~~Here we use CNN and treat localization as a regression problem and the total multitask loss is a sum of two losses.
+
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+- *Multiple Objects Detection*
+
+~~~~由于一幅图里面需要检测的物体的个数不定，所以对于不同图片最后的输出个数也是不一样的！
+
+#figure(
+  image("images/Lec9_multiple_objects_detection_uncertain_outputs_number.png", width: 100%),
+  caption: [multiple object detection outputs numbers],
+)
+
+~~~~但是一个神经网络的输出通常是固定大小的张量！
+
+
+
+
+*A Naive Solution :* 对图像的不同裁剪区域应用 CNN，CNN 把每个裁剪区域分类为物体或背景。
+\
+
+*Problem :* Need to apply CNN to huge number of locations, scales, and aspect ratios, very computationally expensive! （穷举所有窗口进行计算太浪费！）
+
+\
+\
+
+
+
+- *Region Proposal : Selective Search*
+
+~~~~上面讲到穷举所有的 corps 不可行，那么候选区域法提出：不要穷举所有窗口，而是先找出可能包含物体的候选区域，再对这些区域分类。
+\
+
+~~~~生成候选区域的常用方法：Selective Search：基于颜色、纹理、大小等相似度，把图像分割成很多小区域；逐步合并相似区域，生成约 2000 个候选框；这些候选框覆盖了图像中可能物体的位置。
+
+\
+
+
+
+
+- - *Region Proposal Network (RPN)*
+\
+① 输入 + 特征提取：
+
+输入图像后经过 CNN 得到特征图（RPN会在这个特征图上操作而不是原始图像上！）
+
+#figure(
+  image("images/Lec9_RPN_feature_extraction.png", width: 100%),
+  caption: [feature extraction],
+)
+
+\
+*② Anchor Box *（锚框）\
+
+~~~~想象在特征图的每个点上，都有一个固定大小的锚框（此时我们先假设大小为 $20 times 15$），一个锚框是一个矩形框，由 $(x,y,w,h)$ 定义，它是对“这个位置可能存在的物体”的初始猜测。
+
+~~~~对每个锚框，用一个卷积层输出一个分数；分数表示“这个锚框包含物体”的概率；输出形状：每个位置一个分数。在每个点上，预测对应的锚框是否包含物体（二分类）。
+
+#figure(
+  image("images/Lec9_RPN_anchor_boxes_scoring.png", width: 100%),
+  caption: [anchor boxes binary classification],
+)
+
+~~~~对于正样本锚框，还要预测从锚框到真实框的修正量（每个位置回归 4 个数字），微调锚框的位置和大小，让它更接近真实框。
+
+#figure(
+  image("images/Lec9_RPN_anchor_boxes_correction.png", width: 100%),
+  caption: [anchor boxes correction],
+)
+
+
+~~~~实际中，在每个点上使用 K 个不同大小/尺度的锚框
+
+#figure(
+  image("images/Lec9_RPN_K-different_anchor_boxes.png", width: 100%),
+  caption: [$K$ different anchor boxes],
+)
+
+~~~~把所有 $K times 20 times 15$ 个锚框按 objectness 分数排序，取前约 300 个作为候选框
+
+
+
+\
+
+
+
+- *R-CNN (Region-based CNN)*
+\
+*① "slow" R-CNN :*
+
+#figure(
+  image("images/Lec9_slow_R-CNN.png", width: 100%),
+  caption: ["slow" R-CNN],
+)
+
+*Problem :* Very slow ! We need to do \~ 2k independent forward passes for each image !(because there're \~ 2k corps)
+
+*Idea :* *_Pass the image through convnet before cropping_* ! Crop the conv feature instead!
+
+\
+\
+\
+
+
+*② "fast" R-CNN :*
+
+#figure(
+  image("images/Lec9_fast_R-CNN.png", width: 100%),
+  caption: ["fast" R-CNN],
+)
+
+~~~~注：此处模型中 Regions of Interest 是用我们上述的 Region Proposal 方法选取得到的！
+
+
+\
+\
+\
+\
+
+
+- *Single-Stage Object Detectors : YOLO / SSD / RetinaNet*
+\
+*YOLO : _(You Only Look Once) —— real-time object detection_*
+
+~~~~R-CNN 问题：要经历 RPN + 检测两个阶段，计算量较大，检测速度慢！
+
+~~~~YOLO 核心思想：把目标检测变成一个单次回归问题：一张图只跑一次网络，直接输出所有框和类别。
+
+\
+*step ① ：*把图像分割成$s times s$ 的网格
+
+#figure(
+  image("images/Lec9_YOLO_step1_grid.png", width: 50%),
+  caption: [grid],
+)
+
+*step ② ：每个格子独立预测*
+
+~~~~每个格子预测 $B$ 个边界框，每个边界框包含5个值：
+$
+  (x,y,w,h,"confidence")
+$
+
+~~~~训练时：
+$
+  "confidence"("目标值") = P("object") times ("IoU")_("pred")^"truth"
+$
+
+~~~~分别表示框的位置、大小，以及置信度(这个框里有多大概率包含物体，并且框得有多准)
+
+~~~~每个格子还预测 $C$ 个类别概率 $P("class"_i | "object")$， 表示“如果这个格子里有物体，它属于第 $i$ 类的概率”
+
+\
+
+*step ③ ：输出*\
+
+~~~~网络最后输出一个张量：$s times s times (5 B + C)$
+
+
+
+*step ④ ：损失值*
+
+~~~~YOLO 的损失由三部分组成：（定位 + 置信度 + 分类损失）
+$
+  L = lambda_"coord" L_"coord" + L_"conf" + L_"class"
+$
+
+\
+*step ⑤ ：推理*
+
+~~~~得到网络输出的张量后，对每个框计算最终分数：
+$
+  "score"="confidence" times P("class"_i | "object")
+$
+
+~~~~按阈值过滤低分框；对每个类别做 NMS，去除重叠框；得到最终检测结果
+
+
+\
+~~~~注意在训练时，不是每个格子都有真实标签。如果一个物体的中心点落在某个格子内，那么这个格子负责检测这个物体。（其他格子的框的confidence都被设置为0）
+
+\
+\
+\
+\
+
+
+
+- *Object Detection with Transformers : DETR*
+\
+*DETR* 核心思想：\
+
+~~~~把目标检测变成一个集合预测问题：输入图像，直接输出一个固定大小的集合，包含所有物体
+
+#figure(
+  image("images/Lec9_DETR_basic_architecture.png", width: 100%),
+  caption: [DETR basic architecture],
+)
+
+#figure(
+  image("images/Lec9_DETR_detailed_architecture.png", width: 100%),
+  caption: [DETR detailed architecture],
+)
+\
+~~~~最后输出有两个头：分类头（物体类别） + 回归头（框位置）
+
+~~~~把物体检测任务看成一个集合预测问题：输入图像，输出一个集合（集合大小可变），每个元素是“类别 + 框”。
+
+~~~~Transformer 天生就是处理集合的！输入序列，输出也是序列（可以是集合）。\
+~~~~Transformer 的自注意力可以全局建模，自动找到物体位置；不需要显式生成候选框。
+
+~~~~最后可以进行端到端学习！
+
+
+\
+\
+\
+\
+\
+\
+
+
+=== 3. Instance Segmentation
+\
+recall : fast R-CNN
+
+#figure(
+  image("images/Lec9_recall_fast-R-CNN.png", width: 100%),
+  caption: [fast R-CNN],
+)
+
+~~~~在 Faster R-CNN 的基础上，并行添加一个 mask 分支，为每个 RoI 预测一个 28×28 的二值掩码
+
+#figure(
+  image("images/Lec9_mask_R-CNN_architecture.jpg", width: 100%),
+  caption: [mask R-CNN],
+)
+
+
+~~~~RPN 生成 RoI (region of interest) 之后，经过 pooling（注：mask R-CNN 用的是 RoI align） 变成固定大小的特征。（e.g. 每一块都是 $14 times 14 times 256$ 的特征）
+\
+
+~~~~① 分类头：对每个 RoI 的特征，送入全连接层；输出 C+1 个类别的概率（C 个物体类别 + 1 个背景）；用 softmax 得到概率分布。
+\
+
+~~~~② 回归头：对每个 RoI 的特征，送入另一个全连接层；输出 4 个修正量 $(t_x,t_y,t_w,t_h)$；用来微调 RoI 的位置和大小（精确边界框）
+\
+
+~~~~③ Mask 分支：将 RoI 处理后得到的特征输入到4层$3 times 3$ Conv + Transposed Conv $2 times 2$, stride2 + $1 times 1$ Conv 最后输出 $28 times 28 times K$ 即映射到 $K$ 个类别上。
+
+\
+~~~~由于我们在分类头已经得到每个 RoI 的类别（假设此时是“猫”），那么从 Mask 分支输出中取出对应的那一层特征，对这 28×28 个 logits 逐像素做 sigmoid，得到每个像素属于“猫”的概率。设定一个概率阈值后可以取出那些属于“猫”的像素。（其实也是得到一个二值掩码）
+
+~~~~最后把这个 $28 times 28$ 特征图上采样还原至 RoI 大小（e.g. $120 times 80$），我们就得到原始 RoI 图中哪些像素属于“猫”，相当于就是把“猫”的二值掩码贴到原图对应的位置，得到猫这个实例在原图中的像素级掩码！
+
+\
+
+~~~~注：使用 Mask 分支的意义：之前的 fast R-CNN 只是用方框框出每个类别物体的位置，但是现在是要得到每个物体的像素级轮廓。
+
+
+#figure(
+  image("images/Lec9_mask_R-CNN_illustration.jpg", width: 100%),
+  caption: [mask R-CNN illustration],
+)
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+=== 4. Model Layers Visualization
+\
+
+
+- - *First Layer of a Linear Classifier : Filters*
+
+#figure(
+  image("images/Lec9_filters_visualization.png", width: 100%),
+  caption: [filters visualization],
+)
+
+\
+\
+\
+- - *Saliency via Backprop*
+\
+~~~~#underline[把损失对输入像素求梯度，梯度大的像素说明它对分类结果影响大]
+
+e.g : 固定网络权重不变；把输入图像当作变量；求"猫"这个类别的分数对每个像素的偏导；偏导大的像素，就是重要像素。
+
+~~~~最后得到一个和图像同尺寸的矩阵：
+$
+  "Saliency" in RR^(H times W)
+$
+
+~~~~然后对绝对值归一化到 [0,1]，在 RGB 三通道上取最大值，进行可视化：亮的地方：重要像素；暗的地方：不重要像素。
+
+\
+
+（这个想法有点类似之前我看过的模型的“激活空间”的概念与得来！！！）
+
+
+\
+\
+\
+
+
+
+- - *Class Activation Mapping (CAM)*
+\
+~~~~核心思想：用全局平均池化（GAP） + 全连接层权重，把最后一层卷积特征图加权求和，得到类别激活图
+
+#figure(
+  image("images/Lec9_CAM_figure.png", width: 100%),
+  caption: [CAM],
+)
+
+① 全局平均池化(GAP)得到最后的一维向量$F$的操作：
+$
+  F_k = 1 / (H W) sum_(h, w) f_(h, w, k)
+$
+
+② 最后各类别分数计算的公式是：（其实就是一个线性层，我们暂且忽略偏置值）
+$
+  S_c & = sum_k w_(k, c) F_k \
+      & = sum_(k) w_(k, c) 1/ (H W) sum_(h, w) f_(h, w, k) \
+      & = 1 / (H W) sum_(h, w) #text(fill: blue)[$sum_k w_(k, c) f_(h, w, k)$]
+$
+
+~~~~现在我们定义*class activation maps* : $M in RR^(C, H, W)$ :
+
+#text(fill: blue)[$
+  M_(c, h, w) = sum_k w_(k, c) f_(h, w, k)
+$]
+
+
+~~~~直观理解：把最后一层卷积特征图 $f$ 想象成 $K$ 张“特征地图”：\
+
+第 1 张地图：检测某种纹理；\
+第 2 张地图：检测某种形状；\
+$dots$\
+第 $K$ 张地图：检测另一种模式。
+
+\
+~~~~#underline[全连接层的权重 $w_(k,c)$ 告诉我们：对于类别 $c$，第 $k$ 张特征地图有多重要。]
+
+~~~~如果 $w_(k,c)$ 很大，说明第 $k$ 个通道对类别 $c$ 的分数贡献很大。
+
+\
+~~~~所以：
+$ S_c = sum_k w_(k,c) dot F_k $
+
+~~~~也就是：把每个通道的全局平均的值，按重要性加权求和，就得到类别分数。
+
+\
+
+~~~~那么 CAM 就沿用$w_(k, c)$ 作为“通道重要性”的直观含义，用其作为权重对最后一层卷积特征图加权求和，就得到每个空间位置对最后分类为类别 $c$ 的贡献。
+
+\
+#rect[
+  注：或许疑惑为什么 CNN 这里最后一层采用的是全局平均池化（ GAP）而不是VGG采用的将最后一层特征展平为向量后送入线性层呢？\
+  ~~~~因为这是 NIN, 2014 中提出的设计，使参数量大幅减少，不容易过拟合，且保留了通道语义，每个通道对应一个类别概念，CAM 采用了这种做法。
+]
+
+
+\
+\
+
+
+- *Gradient-Weighted Class Activation Mapping (Grad-CAM)*
+\
+~~~~上述所讲的 CAM 有一个问题：只有最后一层卷积能直接对应到全连接层权重；中间层没有这样的权重；所以 CAM 只能用于最后一个卷积层。
+
+
+~~~~现在我们想推广到任意一层。Grad-CAM 思路：#underline[既然全连接权重不好用，那就用梯度来衡量每个通道的重要性。]
+
+\
+① Pick any layer, with activations $A in RR^(H times W times K)$ （获得该层的feature map）
+
+
+② Compute gradient of class score $S_c$ with respect to $A$:
+
+$ frac(partial S_c, partial A) in RR^(H times W times K) $
+
+
+③ Global Average Pool the gradients to get weights $alpha in RR^K$ (每个通道的权重 $alpha_k$):
+
+$ alpha_k = frac(1, H W) sum_(h,w) frac(partial S_c, partial A_(h,w,k)) $
+
+
+④ Compute activation map $M_c in RR^(H times W)$:
+
+$ M_c^(h,w) = "ReLU" (sum_k alpha_k A_(h,w,k)) $
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#pagebreak()
+
+
+
+
 
