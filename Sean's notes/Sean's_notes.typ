@@ -3560,34 +3560,930 @@ Transformer随着序列增长计算量成平方次增长；而RNN / SSM随着序
   ]
 ]
 
-==
+== Attention & Transformers (taught by Justin Johnson)
+
+\
+outline :
+
+#figure(
+  image("images/Lec8_outline.png", width: 100%),
+  caption: [Lec8 outline],
+)
+
+
+\
+\
+
+=== 1. Motivating Example : Seq2Seq task with RNNs
+\
+Input: Sequence $x_1$, ... $x_T$\
+Output: Sequence $y_1$, ..., $y_(T')$
+
+
+~~~~First, we'd use an RNN network as the Encoder :
+*$ h_t = f_W (x_t, h_(t-1)) $*
+
+#figure(
+  image("images/Lec8_motivate_eg_RNN_encoder.jpg", width: 100%),
+  caption: [RNN encoder],
+)
+
+~~~~This encoder will output a summarizing vector $c$ (often is the last hidden state $h_T$) that concludes all the information in the input sequence.
+
+
+~~~~Now we're gonna use the second RNN ($g_U$) as the *decoder* (to translate the input sequence), which usually has the same architecture as the encoder, but with a different set of learned parameters.
+
+*$ s_t = g_U (y_(t-1), s_(t-1), c) $*
+~~~~The encoder is gonna take 3 inputs at each timestep : \
+*$y_(t-1)$* (output token at the previous timestep); \
+*$s_(t-1)$* (previous hidden state in the output sequence); \
+*$c$* (context vector, summarising the entire input sequence)
+
+（注意：最后每一个时间步的输出是由当前时间步的隐态 $s_t$ 加上一个线性层 + Softmax 输出概率得到的 ： $hat(y_t) = "Softmax"W_(h y)s_t + b_y$ ）
+
+#figure(
+  image("images/Lec8_motivate_eg_RNN_encoder_decoder.jpg", width: 100%),
+  caption: [RNN encoder-decoder architecture],
+)
+
+
+~~~~Note that we'd initialize the hidden state of the decoder : $s_0$.
+
+\
+
+#rect[
+  *Problem (Bottleneck)* : the only way that the encoder commuinicate with the decoder is via the context vector $c$. But this leads to a _*input sequence bottlenecks through the fixed size $c$*_ ! (the input sequence cannot be reasonably summarized in that fixed length of vector)
+  \
+
+  *Solution* : Instead, we're gonna change the architecture of the network : *_when processing the output sequence, the model has ability to look back at the input sequence_*. (at each step of the output)
+]
 
 
 
 
 
 
+- *Seq2Seq with RNN & attention*
+
+~~~~First, keep the encoder and the initial decoder state $s_0$ the same.
+
+#figure(
+  image("images/Lec8_RNN+attention_figure1.png", width: 100%),
+  caption: [the same encoder + $s_0$],
+)
+
+\
+
+~~~~Then we *_compute alignment scores_* (scalar) :
+*$ e_(t, i) = f_"att" (s_(t-1), h_i) $*
+
+$f_"attn"$ is a linear layer (concate $s_(t-1), h_i$ and apply linear transformation)
+
+\
+~~~~The scores basically say : what's the similarity between the input token and the output token and the decoder state at the timestep.
+
+\
+
+~~~~After that, we *_normalize alignment scores to get attention weights_* : (softmax will do)
+
+*$ 0 < a_(t,i) < 1, quad sum_i a_(t,i) = 1 $*
+
+
+#figure(
+  image("images/Lec8_RNN+attention_figure2.png", width: 100%),
+  caption: [the same encoder + $s_0$],
+)
+
+\
+
+
+
+~~~~We'd compute the current context vector at this timestep as *_weighted sum of all hidden states_* of the input sequence : （这样编码器每一步都能完整看到 encoder 的所有隐态！）
+
+$
+  c_t = sum_i a_(t, i) h_i
+$
+
+#figure(
+  image("images/Lec8_RNN+attention_figure3.jpg", width: 100%),
+  caption: [compute the context vector],
+)
+
+\
+
+~~~~And use this context vector in the decoder :
+*$ s_t = g_U (y_(t-1), s_(t-1), c_t) $*
+
+where $g_U$ is an RNN unit (e.g. LSTM, GRU)
+
+#figure(
+  image("images/Lec8_RNN+attention_figure4.jpg", width: 100%),
+  caption: [use the context vector],
+)
+
+
+Intuition :\
+Context vector attends to the relevant part of the input sequence
+“vediamo” = “we see”
+so maybe:
+$a_(11) = a_(12) = 0.45, quad a_(13) = a_(14) = 0.05$
+
+\
+~~~~Note that this big computational graph is all *_differentiable_* ! No supervisioin on attention weights. We just do end-to-end learning and backprop through everything.
+
+
+
+
+~~~~Just repeat this process : use $s_1$ to compute new context vector $c_2$, and compute new alignment scores $e_(2, i)$ and attention weights $a_(2, i)$ ......
+
+#figure(
+  image("images/Lec8_RNN+attention_figure5.jpg", width: 100%),
+  caption: [repeat the former process],
+)
+
+\
+
+~~~~By looking at the attention weights $a_(t, i)$ for each word $i$ at each timestep $t$, we'll introspect what does the network have learned.
+
+#figure(
+  image("images/Lec8_attention_weights_introspect.png", width: 70%),
+  caption: [attention weights introspection],
+)
+
+(diagonal attention means words correspond in order)
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+=== 2. Generalized Case
+\
+~~~~Now we're gonna cut away the RNN part, separate attention mechanism out and generalize it as a core primitive for our neural network :
+
+\
+① *Data vectors* : *$q in RR^(D_Q)$* data that we want to summarize, just as the encoder RNN states above\
+
+② *Query vectors* : *$X in RR^(N_X times D_Q)$* like the decoder RNN states\
+
+③ *Output vectors* : context states
+
+~~~~#underline[Each query attends to all data vectors and gives one output vector.]
+
+\
+~~~~In practice, we're gonna use *_scaled dot product_* as the way($f_"att"$) to compute similarity scores(scalars) beween the data vectors and the query vectors, which is simple but good enough.
+\
+
+④ *similarities* : *$e in RR^(N_X)$*
+*$ e_i = (q dot X_i) / sqrt(D_Q) $*
+
+\
+注意：不能直接用点积而是用缩放点积！
+\
+
+原因：当维度 $D_Q$​ 很大时，未缩放的点积数值会非常大（维度越大，方差越大），导致 softmax 进入饱和区，梯度几乎为零，训练困难。
+
+\
+⑤ *attention weights : $a in RR^(N_X)$
+$ a = "softmax"(e) $*
+
+\
+⑥ *output vector : $y = sum_i a_i X_i #h(1em)in RR^(N_X)$*
+
+\
+\
+\
+\
+
+~~~~Further, we can generalize to *a set of query vector* :
+
+
+
+
+- *version 1* (directly reuse data vectors twice)
+\
+*Inputs :*\
+
+① Query vector : $Q quad [N_Q times D_X]$\
+② Data vectors : $X quad [N_X times D_X]$
+
+\
+*Computation :*\
+
+③ Similarities : （注意：这里要计算两组向量之间所有的点积值，恰好矩阵乘法可以做到）
+$
+        E & = Q X^top / sqrt(D_X) quad [N_Q times N_X] \
+  E_(i j) & = Q_i dot X_j / sqrt(D_X)
+$
+
+
+④ Attention weights :
+$ A = "softmax"(E, dim=1) quad [N_Q times N_X] $
+
+
+⑤ Output vector : （注意：这里是要用一组向量的各维度值作为权重来取另一组向量的线性组合，恰好矩阵乘法也是有这样的性质！）
+$
+    Y & = A X quad [N_Q times D_X] \
+  Y_i & = sum_j A_(i j) X_j
+$
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+- *version 2*
+
+~~~~由于 data vectors 会在计算 similarities 以及线性组合得到 output vectors 时候重复使用两次。所以我们想到每个 data vector 可以分别被当作 key 与 value 各使用一次，这也是为了区分开 data vectors 的两次使用，所以我们使用下面的方法。
+
+~~~~*_We project each data vector into two vectors : one is key vector, and another one is value vector._*\
+
+(add two learnable matrices : key matrix $W_K$ + value matrix $W_Q$)
+
+
+
+*Inputs :*
+
+① Query vector: $Q quad [N_Q times D_Q]$\
+② Data vectors: $X quad [N_X times D_X]$\
+③ Key matrix: $W_K quad [D_X times D_Q]$\
+④ Value matrix: $W_V quad [D_X times D_V]$
+
+\
+*Computation :*
+
+Keys :
+$ K = X W_K quad [N_X times D_Q] $
+
+Values :
+$ V = X W_V quad [N_X times D_V] $
+
+Similarities :
+$
+        E & = Q K^top / sqrt(D_Q) quad [N_Q times N_X] \
+  E_(i j) & = Q_i dot K_j / sqrt(D_Q)
+$
+
+Attention weights :
+$ A = "softmax"(E, dim=1) quad [N_Q times N_X] $
+
+Output vector :
+$
+    Y & = A V quad [N_Q times D_V] \
+  Y_i & = sum_j A_(i j) V_j
+$
+
+
+\
+
+- *visualization* : *( Cross-Attention Layer )*
+
+#figure(
+  image("images/Lec8_key-value_projection_visualization.png", width: 70%),
+  caption: [data $arrow^("project")$ key, value ],
+)
+
+(note that the softmax is operated on each column of $E$ (scores))
+
+\
+
+~~~~我们可以认为 key, value matrix 是两个 filter，在原始数据向量中我们通过这两个 filter 来过滤出 key, value 两方面的信息。
+
+\
+
+~~~~以上的这个可视化已经就是一个独立的神经网络，我们可以将其独立地插入到其他地方！(called *cross attention layer* because we have two sets of input : data vectors + query vectors that may come from different sources)
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+
+- *Self-Attention Layer*
+
+~~~~We just have one set of input vectors, so we're gonna add a learnable *_Query matrix_* that converts input vectors to query vectors.
+
+
+- - *Inputs:*
+
+① Input vectors: $X quad [N times D_"in"]$\
+② Key matrix: $W_K quad [D_"in" times D_"out"]$\
+③ Value matrix: $W_V quad [D_"in" times D_"out"]$\
+④ Query matrix: $W_Q quad [D_"in" times D_"out"]$\
+
+
+\
+
+- - *Computation:*
+
+⑤ Queries :
+$ Q = X W_Q quad [N times D_"out"] $
+
+⑥ Keys :
+$ K = X W_K quad [N times D_"out"] $
+
+⑦ Values :
+$ V = X W_V quad [N times D_"out"] $
+
+
+~~~~For a single input, the computation is often fused to *_one matmul_* :
+$
+    [Q quad K quad V] & = X[W_Q quad W_K quad W_V] \
+  [N times 3 D_"out"] & = [N times D_"in"] [D_"in" times 3 D_"out"]
+$
+\
+⑧ Similarities :
+$
+        E & = Q K^top / sqrt(D_"out") quad [N times N] \
+  E_(i j) & = Q_i dot K_j / sqrt(D_"out")
+$
+
+⑨ Attention weights :
+$ A = "softmax"(E, dim=1) quad [N times N] $
+
+⑩ Output vector :
+$
+    Y & = A V quad [N times D_"out"] \
+  Y_i & = sum_j A_(i j) V_j
+$
+
+
+
+
+
+- - *visualization* :
+
+#figure(
+  image("images/Lec8_self_attention_visualization.jpg", width: 70%),
+  caption: [self attention layer],
+)
+\
+~~~~Each input produces one output, which is a mix of information from all inputs.
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+
+- *Permutation Equivariance*
+\
+~~~~Let's consider if we permute the inputs :
+\
+~~~~Now the queries, keys, values, similarities, attention weights will be the same but permuted.
+\
+~~~~In this case, we see that *_the outputs are the same but permuted_* !
+
+#figure(
+  image("images/Lec8_self_attention_permutation.png", width: 70%),
+  caption: [self attention permuted],
+)
+
+\
+
+
+~~~~This means that self-attention doesn't really care about the order of the inputs. If we shuffle the inputs, then the outputs will just be shuffled in the same way. \
+~~~~So we can think that self-attention is not operating on a sequence of input vectors but on *_a set of vectors_* where the positions of vectors doesn't matter.
+
+\
+
+#rect[
+  *Problem *: Self-attention does not know the order of the sequence.
+  \
+
+  *Solution* : Add *_positional encoding_* to each input; this is a vector that is a fixed function of the index. (e.g: RoPE)
+]
 
 
 
 
 
 
+- *Masked Self-Attention Layer*
+\
+~~~~If we don't let vectors "look ahead" in the sequence, then we'd *_override similarities with $-infinity$_*; this can control which inputs each vector is allowed to look at.
+
+(this can be used for language modeling where the model predicts the next word)
+
+#figure(
+  image("images/Lec8_masked_self-attention_layer.png", width: 70%),
+  caption: [masked self-attention layer],
+)
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+- *Multiheaded Self-Attention Layer*
+\
+~~~~单头 self-attention 有一个问题：每个输入向量只能产生一组 attention weights，也就是只能关注一种模式。
+
+~~~~但自然语言中，一个词可能需要同时关注多种关系：语法、语义......
+
+~~~~解决思路：并行运行 $H$ 个独立的 self-attention，每个 head 有自己的 $W_Q,W_K,W_V$，分别学习不同的关注模式。
+
+
+#figure(
+  image("images/Lec8_multiheaded_self-attention_layer.png", width: 70%),
+  caption: [multiheaded self-attention layer],
+)
+
+~~~~Here, $H = 3$ independent self-attention layers
+(called heads), each with their own weights.\
+
+~~~~Stack up the H independent outputs for each input X.\
+
+~~~~Output projection fuses data from each head
+
+\
+
+- - *Inputs :*
+
+① Input vectors: $X quad [N times D]$\
+② Key matrix: $W_K quad [D times H D_H]$\
+③ Value matrix: $W_V quad [D times H D_H]$\
+④ Query matrix: $W_Q quad [D times H D_H]$\
+⑤ Output matrix: $W_O quad [H D_H times D]$
+
+（注：一般取 $D_H = D / H$，那么输出维度就是$H D_H = D$）
+
+\
+\
+
+- - *Computation terms* :\
+
+*1 ) 投影 ：*\
+
+(注：reshape成多头形式：把 $H D_H$ 维的输出，切成 $H$ 份，每份 $D_H$ 维，分给 $H$ 个 head)
+\
+
+Queries:
+$
+  Q = X W_Q quad [N times H D_H] arrow^"reshape" [H times N times D_H]
+$
+
+Keys:
+$
+  K = X W_K quad [N times H D_H] arrow^"reshape" [H times N times D_H]
+$
+
+Values:
+$
+  V = X W_V quad [N times H D_H] arrow^"reshape" [H times N times D_H]
+$
+
+\
+
+*2 ) 对第 $h$ 个 head ：*
+
+① Similarity :
+
+$ E^((h)) = frac(Q^((h)) (K^((h)))^top, sqrt(D_H)) in RR^(N times N) $
+
+注意：缩放因子是 $sqrt(D_H)$，不是 $sqrt(D)$。
+
+② Attention weights ：
+
+$ A^((h)) = op("softmax")(E^((h))) in RR^(N times N) $
+
+③ Outputs :
+
+$ Y^((h)) = A^((h)) V^((h)) in RR^(N times D_H) $
+
+\
+
+*3 ) 在第 2 ) 步基础上将所有 head 结果合为一体（相当于直接一起算）*
+
+$ E = frac(Q K^top, sqrt(D_H)) in RR^(H times N times N) $
+
+$ A = op("softmax")(E, "dim"=2) in RR^(H times N times N) $
+
+$
+  Y & = A V in RR^(H times N times D_H) \
+    & arrow^"reshape" RR^(N times H times D_H)
+$
+
+再最后投影回 $D$ 维空间：
+$
+  O=Y W_O​ in RR^(N times D)
+$
+
+\
+\
+\
+\
+\
+
+
+*Computation steps conclusion *:
++ *QKV Projection*
+
+  $ [N times D] [D times 3 H D_H] arrow.r [N times 3 H D_H] $
+
+  Split and reshape to get $Q$, $K$, $V$ each of shape $[H times N times D_H]$
+
++ *QK Similarity*
+
+  $ [H times N times D_H] [H times N times D_H] arrow.r [H times N times N] $
+
++ *V-Weighting*
+
+  $ [H times N times N] [H times N times D_H] arrow.r [H times N times D_H] $
+
+  Reshape to $[N times H D_H]$
+
++ *Output Projection*
+
+  $ [N times H D_H] [H D_H times D] arrow.r [N times D] $
+
+
+
+\
+
+
+
+~~~~Each of the $H$ parallel layers use a qkv dim of $D_H = "head dim"$\
+~~~~Usually $D_H = D / H$, so inputs and outputs have
+the same dimension.
+
+\
+
+~~~~In practice, compute all $H$ heads in parallel using batched matrix multiply operations.
+
+
+\
+\
+\
+\
+\
+\
+
+- *Three Ways of Processing Sequences*
+\
+*1 ) RNN*
+
+#figure(
+  image("images/Lec8_sequence_process_way1_RNN.png", width: 70%),
+)
+
+*Advantage* : Theoretically good at long sequences: $O(N)$ compute and memory for a sequence of length $N$. （计算复杂度，内存复杂度都较低）\
+
+*Disadvantage* : _Not parallelizable_. Need to compute hidden states sequentially.
+
+\
+\
+
+*2 ) Convolution*
+
+#figure(
+  image("images/Lec8_sequence_process_way2_convolution.png", width: 70%),
+)
+
+*Disadvantage* : Bad for long sequences: need to stack many layers to build up large receptive fields.\
+
+*Advantage* : _Parallelizable_, outputs can be computed in parallel.
+
+\
+\
+\
+\
+
+
+*3 ) Self-Attention*
+
+#figure(
+  image("images/Lec8_sequence_process_way3_self-attention.png", width: 70%),
+)
+
+*Advantage* : Great for long sequences; each output depends directly on all inputs（一层就能建立任意两个位置之间的依赖）; _highly parallel_, it’s just 4 matmuls.\
+
+*Disadvantage* : Expensive: $O(N^2)$ compute, $O(N)$  memory for sequence of length N.
+
+
+
+\
+\
+\
+\
+\
+\
+\
+
+- *Transformer Block*
+
+#figure(
+  image("images/Lec8_transformer_block.png", width: 100%),
+  caption: [transformer block],
+)
+
+Input: Set of vectors $x$\
+Output: Set of vectors $y$\
+
+~~~~Self-Attention is the only interaction between vectors.\
+~~~~LayerNorm and MLP work on each vector independently（注意：各个MLP独立地处理不同时间步的输出；LayerNorm对每个向量独立地做归一化）. \
+~~~~Residual connecting : 让梯度可以绕过子层直接传播，缓解梯度消失，即使子层的梯度很小，梯度也能传回去。\
+~~~~Highly scalable and parallelizable, most of the compute is just 6 matmuls: 4 from Self-Attention + 2 from MLP
+
+\
+
+~~~~A Transformer is just a stack of indentical Transformer blocks !
+
+
+\
+\
+\
+\
+\
+\
+\
+
+- *Transformer Applications*
+\
+- - *For Language Modeling (LLM)*
+
+
+~~~~Learn an *_embedding matrix_* at the start of the model to convert words into vectors. Given vocab size V and model dimension D, it’s a lookup table of shape [V x D]\
+
+
+~~~~Use *_masked attention_* inside each transformer block so each token can only see the ones before it.\
+
+~~~~At the end, learn a *_projection matrix_* of shape [D x V] to project each D-dim vector to a V-dim vector of scores for each element of the vocabulary.\
+
+~~~~Train to predict next token using *_softmax + cross-entropy loss_*.
+
+
+#figure(
+  image("images/Lec8_transformer_for_LM_figure.png", width: 50%),
+  caption: [transformer for LM (LLM)],
+)
+
+
+\
+\
+\
+\
+
+
+- - *Vision Transformers (ViT)*
+\
+#figure(
+  image("images/Lec8_ViT_figure.jpg", width: 100%),
+  caption: [ViT],
+)
+
+把图像切成小块（patches），每个 patch 当成一个 token；每个 patch 展平成一个向量，然后通过一个线性层投影到模型维度 $D$；因为 Transformer 不知道顺序，需要加上位置编码；最后送入 Transformer 即可。
 
 
 
 
 
 
+- *Tweaking Transformers*
+\
+- - *Pre-Norm Transformer*
+
+~~~~Before, the layer normalization is outside the residual connection. It's kind of weird because the model can't actually learn the identity function.
+
+#figure(
+  image("images/Lec8_transformer_block.png", width: 100%),
+  caption: [previous transformer block],
+)
+\
+~~~~Solution : *_Move layer normalization before the self-attention and MLP, inside the residual connections._* Training is more stable.
+
+#figure(
+  image("images/Lec8_pre-norm_transformer.png", width: 70%),
+  caption: [pre-norm transformer],
+)
+
+注：post-norm 为 ：
+$
+  x′= "LayerNorm"(
+    x + "SubLayer"(x)​​)
+$
+假设子层什么不做（为0），那么输出结果为 x 被层归一化后的结果，$x' != x$，无法学到恒等函数！
+
+\
+~~~~而 pre-norm 的残差连接在子层操作之外：
+$
+  x′ = x + "SubLayer"("LayerNorm"(x))
+$
+若子层什么不做输出0，那么最后 $x' = x$ 能成功学到恒等函数！
+\
+\
+\
+\
+
+
+- - *QK-Norm*
+
+~~~~在注意力机制分数计算中，如果 $Q$ 和 $K$ 的数值很大，点积会很大，softmax 会饱和，梯度会消失。所以我们的改进方案是：Normalize queries and keys before computing attention similarities.
+
+Queries:
+$ Q = op("normalize")(X W_Q) quad [H times N times D_H] $
+
+Keys:
+$
+  K = op("normalize")(X W_K) quad [H times N times D_H]
+$
+
+Values:
+$
+  V = X W_V quad [H times N times D_H]
+$
+
+Similarities:
+$
+  E = (Q K^top) / sqrt(D_Q) quad [H times N times N]
+$
+
+~~~~This prevents gradient spikes and thus stabilizes training.
+
+\
+e.g : Normalize with RMSNorm:
+
+$ y_i = frac(x_i, "RMS"(x)) * gamma_i $
+
+$ "RMS"(x) = sqrt(epsilon + frac(1, N) sum_(i=1)^N x_i^2) $
+
+
+注意：只对 $Q, K$ 做归一化，$V$ 不做归一化。因为QK-Norm 的目的是控制注意力分数的数值范围，防止 softmax 饱和，而 V 不参与相似度计算，所以对它做归一化既没必要，还会损害信息。
+
+\
+\
+\
+\
+\
 
 
 
+- - *SwiGLU MLP*
+
+#figure(
+  image("images/Lec8_SwiGLU_figure.jpg", width: 100%),
+  caption: [standard MLP vs. SwiGLU ],
+)
+\
+*① Classic MLP*\
+
+~~~~单通路结构，先做线性变换，过激活函数，再做第二次线性变换\
+
+*Input :* $X: quad [N times D]$
+
+*Weights :*
+$W_1 :quad [D times 4D] #h(2em)
+W_2: quad [4D times D]$
+
+*Output :*
+$Y = sigma(X W_1) W_2 : quad [N times D]$
 
 
+\
 
 
+*② SwiGLU MLP*\
+
+- *Branch 1（主通路/激活分支）：* 输入经过线性变换 $W$ 后，通过 $"Swish"$（即 $"SiLU"$）激活函数。
+- *Branch 2（门控分支）：* 输入经过另一个独立的线性变换 $V$。
+- *门控融合（$hadamard$）：* 两条分支的结果进行逐元素相乘（Hadamard Product）
+- *输出投影：* 融合后的特征最后通过线性变换 $W_2$ 输出。
 
 
+$ "SwiGLU"(X) = ("Swish"(X W) hadamard X V) W_2 $
+
+*Input:* $X quad [N times D]$
+
+*Weights:*
+$W_1, W_2: quad [D times H] #h(1.5em) W_3: quad [H times D]$
+
+*Output:*
+$Y = (sigma(X W_1) hadamard X W_2) W_3$
+
+
+\
+SwiGLU 就是把 GLU 中的激活函数 $sigma$ 换成 swish.
+
+\
+
+~~~~Setting $H = (8D)/3$ keeps same total params.
+
+
+\
+\
+\
+\
+\
+\
+\
+\
+
+- - *Mixture of Experts (MoE)*
+\
+~~~~大模型需要大量参数来提升容量，但参数越多，计算量越大，训练和推理成本越高。\
+
+~~~~MoE 的核心思想：把一个大 MLP 拆成多个“专家”MLP，每个 token 只激活其中少数几个专家。这样总参数量可以很大，但每个 token 的计算量只和激活的专家数有关。
+
+~~~~基本结构 :\
+~~~~在 Transformer 的每个 Block 中，把原来的 MLP 替换为 : $E$ 个专家 MLP，每个专家有自己的权重；一个路由网络（Router），决定每个 token 去哪些专家。
+
+~~~~Learn $E$ separate sets of MLP weights in each block; each MLP is an expert
+
+$ W_1: [D times 4D] => [E times D times 4D] $
+
+$ W_2: [4D times D] => [E times 4D times D] $
+
+~~~~Each token gets routed to $A < E$ of the experts. These are the active experts.
+
+\
+路由机制 :\
+
+对于每个 token $x$：
+
+① 路由网络计算它到每个专家的得分：
+
+$ s = op("softmax")(x W_r) $
+
+其中 $W_r in RR^(D times E)$。
+
+② 选择得分最高的 $A$ 个专家（通常 $A ≪ E$），只有这 $A$ 个专家参与计算，输出加权求和：
+
+$ y = sum_(i in "Top-" A) s_i dot "Expert"_i (x) $
+
+~~~~Increases params by $E$, but only increases compute by $A$
+
+\
+
+Example: Gemma4 26B-A4B (4/2/2026)
+
+- 1 “shared expert” processes all tokens
+- 128 “routed experts”; each token selects 8/128 to process it
+- 26B total params, but each token only “activates” 4B params
 
 
 
